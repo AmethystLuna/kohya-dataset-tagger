@@ -12,6 +12,10 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="タガーのメイン画面：左がルートディレクトリとサブディレクトリ、中央がギャラリー、右がタグ頻度" width="100%">
+</p>
+
 **kohya 形式の学習セット**のためのスタンドアロンなタガー。LoRA ／ フルファインチューニング ／ DreamBooth はどれも同じ `image_dir` + `.txt` サイドカー形式を使い、一連の作業はすべてブラウザーで完結する：
 
 **ディレクトリ閲覧 → ギャラリープレビュー → 画像ごとのタグ編集 → タグのフィルタリング → WD14 による一括キャプション付け → 学習に使える `dataset.toml` の生成**

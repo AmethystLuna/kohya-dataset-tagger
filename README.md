@@ -12,6 +12,10 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
 </p>
 
+<p align="center">
+  <img src="assets/screenshot.png" alt="The tagger's main screen: root and subdirectories on the left, the image gallery in the middle, tag frequency on the right" width="100%">
+</p>
+
 A standalone tagger for **kohya-style training sets**. LoRA, full finetune and DreamBooth all use the same `image_dir` + `.txt` sidecar layout, and the whole chain runs in the browser:
 
 **browse the directory → preview the gallery → edit tags per image → filter by tag → batch-caption with WD14 → generate a trainable `dataset.toml`**

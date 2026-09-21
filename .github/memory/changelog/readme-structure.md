@@ -98,7 +98,9 @@ narrower: **an introduction, a deployment and a usage guide**, nothing else. The
 gone, the contributor half moved to `CONTRIBUTING.md` and `AGENTS.md` (the Contributing section points at
 them now), and the status block became the lead paragraph. 188 -> 154 lines. What a reader still needs from
 the deleted essay survives as a four-entry **FAQ** at the end: a cache file disappearing, what the tool
-writes, the six export warnings, and which arguments the launchers take.
+writes, the six export warnings, and which arguments the launchers take. One pointer came back after review:
+the GPU section mentions `setup_env_cn.*` again (the original page did), because that is where a reader meets
+the slow-index fact - the mirror order and the measured speeds stay in "Install and run" only.
 
 ## Polished with a local model, and what survived the review (2026-09-21)
 

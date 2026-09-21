@@ -69,7 +69,7 @@ onnxruntime decides the speed, so the Windows setup scripts install the **Direct
 
 CUDA is 14% faster; it costs 195 MB more plus a torch dependency.
 
-An onnxruntime install must pin `--index-url` (both setup scripts already do): the global pip index can be slow enough to look hung - 0.07 MB/s measured on the reference machine. Then check which provider the session really uses:
+An onnxruntime install must pin `--index-url` (both setup scripts already do): the global pip index can be slow enough to look hung - 0.07 MB/s measured on the reference machine. On a mainland-China network, `setup_env_cn.*` pins a domestic mirror instead. Then check which provider the session really uses:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_provider.py    # builds a session with a real model and reports the provider in use

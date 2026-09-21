@@ -69,7 +69,7 @@
 
 CUDA 快 14%，代价是多 195 MB 外加一个 torch 依赖。
 
-装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。装完确认 session 实际用的是哪个提供程序：
+装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。中国大陆网络用 `setup_env_cn.*`，它钉的是国内镜像。装完确认 session 实际用的是哪个提供程序：
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_provider.py    # 用真实模型建一个 session，报告实际生效的提供程序

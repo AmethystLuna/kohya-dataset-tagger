@@ -152,9 +152,19 @@ the commit either - it uses the GitHub noreply address (`git config user.email`,
 
 ## Known limits
 
-- **Only the Windows job is measured.** There is no Linux and no Docker on this machine, so the Ubuntu jobs
-  are reasoned from the suite's own platform guards (`os.name == "nt"` skips, `/etc` fallbacks) - not from a
-  run. The Windows job mirrors the simulation.
+- **The first real CI run (2026-09-21)**: both **Ubuntu jobs passed** (3.10 and 3.13), so the suite's
+  platform guards hold on a real Linux runner - that part was reasoned from the guards before, and is now
+  measured. The Windows job failed, and not in the product: `start_arg_problems` tested
+  `DRY_RUN_PYTHON.startswith("/")`, while GitHub's Windows runner prints the **drive-letter** form
+  (`D:/a/<repo>/<repo>/.venv/Scripts/python.exe`) where this machine prints `/f/ai-alchemy/...`. Both are
+  absolute, both execute, and the value was never wrong - the gate was. It now accepts either spelling
+  (`is_absolute_sh_path`), rejects only a bare relative path (its actual purpose), and a new criterion pins
+  all three absolute forms plus that relative one.
+- **How the failure was diagnosed**: from the Actions API (`/actions/jobs/<id>/logs`, read once with the
+  credential `git` already stores - never printed, never persisted), not from a local guess. The local
+  machine cannot reproduce it: its Git Bash prints the POSIX form, so the two criteria were green here and
+  red there. The falsification is the reverse direction - putting `startswith("/")` back turns the runner's
+  recorded value red again.
 - The sample dataset satisfies the `dataset_client` criteria, not the **vocabulary** ones: with no model
   downloaded those skip, and that is the intended answer rather than a gap.
 - `tools/` was cut down to the ten scripts that are still load-bearing (the gate, the provider check, the

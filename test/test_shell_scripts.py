@@ -73,6 +73,26 @@ def msys_posix_path(path: os.PathLike | str) -> str:
     return text
 
 
+def is_absolute_sh_path(text: str) -> bool:
+    """Is this an absolute path **as the shell sees it**?
+
+    Three forms are legitimate, and all three really occur:
+
+      * /f/repo/.venv/Scripts/python.exe - what Git Bash prints in this repository, and the only
+        form on Linux / macOS;
+      * F:/repo/.venv/Scripts/python.exe - the drive-letter form Git Bash prints when the
+        environment hands it a Windows PWD. **Measured on a GitHub windows-latest runner
+        (2026-09-21)**: the two start.sh --dry-run criteria went red there while Ubuntu stayed
+        green, because they accepted only the first form. This machine happens to print the first;
+      * F:\\repo\\.venv\\Scripts\\python.exe - the same, with backslashes.
+
+    A bare relative path (.venv/Scripts/python.exe) is what this gate is for, and it still fails.
+    """
+    if text.startswith("/"):
+        return True
+    return len(text) > 2 and text[1] == ":" and text[0].isalpha() and text[2] in "/\\"
+
+
 def run_script(args, *, env_extra=None, cwd=REPO, timeout=120):
     """Run a .sh. **encoding must be explicit**: this machine's locale is GBK, and when the script's output contains Chinese
     subprocess's reader thread raises UnicodeDecodeError, after which stdout simply becomes None
@@ -194,7 +214,7 @@ def start_arg_problems(dry: DryRun, *, must_have=(), must_not_have=()) -> list[s
     problems: list[str] = []
     if not dry.python:
         problems.append("no DRY_RUN_PYTHON line")
-    elif not dry.python.startswith("/"):
+    elif not is_absolute_sh_path(dry.python):
         problems.append("DRY_RUN_PYTHON is not an absolute path: %r" % dry.python)
     if not dry.port or not dry.port.isdigit():
         problems.append("DRY_RUN_PORT is not a port number: %r" % dry.port)
@@ -664,6 +684,23 @@ def test_argv_gate_goes_red_when_model_paths_are_forwarded_again() -> None:
 
     clean = forwarded.replace("DRY_RUN_ARG=--extra-models\n", "").replace("DRY_RUN_ARG=/models\n", "")
     assert not start_arg_problems(parse_dry_run(clean), must_not_have=("--extra-models",))
+
+
+def test_the_interpreter_path_may_be_any_absolute_form_but_not_a_relative_one() -> None:
+    """Both absolute spellings a shell can produce are accepted; a relative one never is.
+
+    Git Bash prints /f/repo/... here and D:/a/repo/... on a GitHub windows-latest runner (the
+    environment hands it a Windows PWD). The gate used to test `startswith("/")`, so the runner's
+    two --dry-run criteria failed while Ubuntu stayed green - the value was absolute all along.
+    """
+    args = ("-m", "kohya_dataset_tagger", "--port", "3001")
+    for good in ("/home/runner/work/kdt/.venv/bin/python",                     # Linux / macOS
+                 "/f/ai-alchemy/kdt/.venv/Scripts/python.exe",                 # Git Bash here
+                 "D:/a/kdt/kdt/.venv/Scripts/python.exe",                      # Git Bash on the runner
+                 r"D:\\a\\kdt\\.venv\\Scripts\\python.exe"):         # ...with backslashes
+        assert not start_arg_problems(DryRun(python=good, port="3001", args=args)), good
+    relative = start_arg_problems(DryRun(python=".venv/Scripts/python.exe", port="3001", args=args))
+    assert relative, "a relative interpreter path is the thing this gate exists to catch"
 
 
 def test_argv_gate_goes_red_when_the_port_is_not_passed_down() -> None:

@@ -18,15 +18,6 @@
 
 它以独立应用的形式运行，有自己的进程和页面，直接操作数据集里已有的文件：每张图旁边的 `.txt` caption、训练缓存、`dataset.toml`。
 
-**V0.1 · P0 完成**。后端、前端、tagger、模型下载、`dataset.toml` 生成全部落地，并通过了 P0 验收。
-
-```text
-pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # 全新克隆：用仓库自带样例数据集，未装 tagger 模型
-pytest test/test_docs_index.py -q          15 passed
-```
-
-数据来自 CI（`windows-latest`、Python 3.10，2026-09-21）。前提不存在的判据——真实训练集、已下载的模型、真实词表——会自己跳过并说明原因，所以全新克隆是绿的。CI 跑什么、验收判据在哪，见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
-
 ## 安装与运行
 
 | 要做什么 | Windows | Linux / macOS |

@@ -18,15 +18,6 @@ A standalone tagger for **kohya-style training sets**. LoRA, full finetune and D
 
 It runs as its own app, with its own process and page, and works directly on the files the dataset already has: the `.txt` caption beside each image, the training caches, and `dataset.toml`.
 
-**V0.1 · P0 complete.** Backend, frontend, tagger, model download and `dataset.toml` generation have all landed and passed the P0 acceptance round.
-
-```text
-pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # a fresh clone: the sample dataset, no tagger model
-pytest test/test_docs_index.py -q          15 passed
-```
-
-Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose subject is missing - a real training set, a downloaded model, the real vocabulary - skips itself and says so, which is why a fresh clone is green. [CONTRIBUTING.md](CONTRIBUTING.md) lists what CI runs and where the acceptance criteria live.
-
 ## Install and run
 
 | Task | Windows | Linux / macOS |

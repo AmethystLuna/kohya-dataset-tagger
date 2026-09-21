@@ -12,12 +12,13 @@ metadata:
 
 ## Gate status
 
+    .\.venv\Scripts\python.exe -m pytest test/ -q -n auto -m "not network"   1108 passed, **0 failed**, 2 skipped (2026-09-21, README-structure round: +6 criteria in the documentation gate, no product change)
     .\.venv\Scripts\python.exe -m pytest test/ -q -n auto      1101 passed, **0 failed**, 2 skipped (2026-09-21, desensitization round - the 3 reds are gone because the golden counts were deleted, see below)
-    fresh clone (no local_paths.ini, sample dataset only)        1072 passed, **0 failed**, 31 skipped (2026-09-21)
+    fresh clone (no local_paths.ini, sample dataset only)        1079 passed, **0 failed**, 31 skipped (2026-09-21, README-structure round; 1073 before it)
     .\.venv\Scripts\python.exe -m pytest test/ -q -n auto      1099 passed, 3 failed, 2 skipped (2026-09-21, remembered-panel-parameters round; the run before it - export-scope-list + its scope-recursive-cache follow-up - read 1098/3/2; the 3 reds are **not code**: test_paths.py (x2) and test_dataset_toml.py compare a hardcoded 1653 against a live dataset that now holds **1655** - see "the dataset grew" below; the same command before this round read 1091 passed, 2 skipped (2026-09-20, gallery-scroll-priority round; +1 over the command-bar-and-census-row round's 1090/2 (test_web_gallery.py gained the scroll-priority criterion that runs the new gallery_scroll_harness.mjs), and +10 over the topbar-layout round's 1080/2: test_web_palette.py 17 -> 24 criteria (two replaced one-for-one, three added, four for the dialog-head scale, one for the group-head band, one that runs the real page for the band's margins and skips where no Chromium is installed), test_web_breadcrumb.py 5 -> 7 (the census row), test_measure_web_layout.py 23 -> 24 (the probe's --lang), test_web_theme.py 15 -> 15 (the row list changed, the count did not)))
     .\.venv\Scripts\python.exe -m pytest acceptance/ -q        79 passed, 2 failed (2026-09-20, export-scope-list round - run as `tools/check_relevant.py --full`, **not** as one `test/ acceptance/` command; the 2 reds are A2 and A23, the same hardcoded 1653)
     .\.venv\Scripts\python.exe -m pytest test/ acceptance/ -q    1132 passed, 2 skipped (2026-09-20, crop round; **not** re-run since - no contract moved this round)
-    python -m pytest test/test_docs_index.py -q                  9 passed (2026-09-21, remembered-panel-parameters round)
+    python -m pytest test/test_docs_index.py -q                  15 passed (2026-09-21, README-structure round: rule 6, the three front pages; 9 before it)
     test/fixtures/*_harness.mjs (node, fake DOM/fetch)           all **24** green, exit 0 (2026-09-21, run by hand: scale_harness.mjs gained the remembered-parameter sections 2b and 10; before that the scope-list criteria; 2026-09-20: gallery_scroll_harness.mjs is new and thumb_loader_harness.mjs gained the queue-ranking criteria; the round before that: palette_harness.mjs gained the dropdown's dismissal rules - Tab closes, a click outside closes, Ctrl+K never toggles)
     read-only guard A1 (--out sampled before the run / --check compared at the end)  fingerprint unchanged (**relative** invariant, see §0.4)
     tools/e2e_smoke.py (real service + real data)                   20/20 (2026-09-19, not rerun since)
@@ -39,6 +40,13 @@ this repository. Measured: the first simulation of a clean checkout (before the 
 skip) had **21 failed + 21 errors**; the suite on a clone with **no private configuration at all** is green
 (the gate line above). The Ubuntu CI jobs are reasoned, not measured: this machine has no Linux and no Docker.
 See [changelog/open-source-readiness](changelog/open-source-readiness.md).
+
+**The front page was reorganised and is now gated in three languages (2026-09-21).** The three READMEs follow
+the documentation rules ([documentation-style](documentation-style.md)): the reader's path first, the
+contributor material under one **Development** section, and the UI's own control names. The documentation
+gate's rule 6 keeps the navigation, the heading skeleton, the tables' shape, the command lines and the link
+targets identical across `README.md`, `README.zh-CN.md` and `README.ja.md`. See
+[changelog/readme-structure](changelog/readme-structure.md).
 
 ## Built and verified
 

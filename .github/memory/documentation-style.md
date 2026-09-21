@@ -1,6 +1,6 @@
 ---
 name: documentation-style
-description: Repository documentation writing rules: indexes only route, topics carry the body, frontmatter shape, honest labeling and resolvable links
+description: Repository documentation writing rules: indexes only route, topics carry the body, frontmatter shape, honest labeling and resolvable links; and the three README front pages, which are one document in three languages
 metadata:
   type: topic
 ---
@@ -26,6 +26,8 @@ Violating the structure isn't an aesthetic problem: the resident index is paid f
 4. **`AGENTS.md` carries no detail.** Budget is 28 KB; over that the gate reports the file size directly.
 5. **Every relative link must resolve.** Links in the index start from `.github/memory/`.
    To mention the repository-root `test/test_docs_index.py`, write it as inline code - **don't make it a markdown link**, or the gate reports a missing file.
+6. **The three READMEs stay in step**: one navigation, one skeleton, one set of commands and link targets,
+   translated prose only (see "The three front pages" below).
 
 ## Where new facts go
 
@@ -84,6 +86,29 @@ Counter-example -> good example:
   Counter-example -> good example: adding `when_to_use:` at the top level -> the gate reports `non-spec keys`; moving it into `metadata.when_to_use` -> passes.
 - `description` is non-empty and <=1024 characters, and should say "when to use it", not just "what it is"; the body must be non-empty.
 - SKILL.md carries the process only; concrete parameters and conclusions stay in memory topic files - don't repeat them.
+
+## The three front pages (the READMEs)
+
+`README.md`, `README.zh-CN.md` and `README.ja.md` are one document in three languages, and they are the
+only documentation a visitor reads before deciding whether to install anything. Two rules follow.
+
+**It is a front page, not a manual.** The reader has a dataset and a question. The page answers in this
+order: what this is, whether it is ready (with the measured numbers), what it does that the trainer does
+not, how to install and run it, and last how to work on it. Detail is **linked, not restated**:
+[CONTRIBUTING.md](../../CONTRIBUTING.md) for the gate and the CI jobs, `AGENTS.md` for the constraints,
+`.github/memory/` for the mechanisms. A command that `AGENTS.md` already carries does not need a second
+copy here.
+
+**Editing one is editing all three.** Commands, paths, identifiers, numbers, table shapes and code blocks
+are the same in all three; only the prose and the comments inside code blocks are translated. The centred
+language navigation under the title is byte-identical in all three and links the same three files in the
+same order.
+
+`test/test_docs_index.py` (rule 6) enforces the parts a translator must not touch: the navigation, the
+heading structure, every table's row and column count, the command lines of every code block, and the set
+of link targets. One consequence: a fenced block holds **commands, not prose** - a listing that is
+translated line by line (the documentation layout, say) belongs in a table, whose shape is checked while
+its cells stay free.
 
 ## General technical writing rules
 

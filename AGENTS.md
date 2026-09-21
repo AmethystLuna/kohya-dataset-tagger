@@ -11,9 +11,9 @@ just wastes context.
 **Skills live in `.agents/skills/`**: one directory per `SKILL.md` plus `name`/`description` frontmatter;
 frontmatter holds only spec fields, client extensions go under `metadata`.
 
-The budget gate `test/test_docs_index.py` watches five things: this file ≤ 28 KB, every link in the index points at an existing file,
+The budget gate `test/test_docs_index.py` watches six things: this file ≤ 28 KB, every link in the index points at an existing file,
 no orphan topic files, every `INDEX-<category>.md` is linked from both `MEMORY.md` and the routing table here,
-and every skill's frontmatter is spec-compliant. **Do not write details back into this file** - new content goes into a topic file, with one line added to the index.
+every skill's frontmatter is spec-compliant, and the three READMEs stay in step (one navigation, one skeleton, one set of commands and link targets). **Do not write details back into this file** - new content goes into a topic file, with one line added to the index.
 
 ---
 

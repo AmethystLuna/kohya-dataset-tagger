@@ -142,8 +142,11 @@ there is treated as unfinished:
   into `.github/memory/changelog/`.
 - `AGENTS.md` itself stays an index with a 28 KB budget. Detail goes into a topic file.
 - **The README exists in three languages** (`README.md`, `README.zh-CN.md`, `README.ja.md`). Changing one is
-  changing all three: commands, paths, tables, code blocks and the language navigation stay byte-identical,
-  and only the prose and the comments inside code blocks are translated.
+  changing all three: commands, paths, identifiers, numbers, table shapes and code blocks stay the same, and
+  only the prose and the comments inside code blocks are translated. The documentation gate checks the
+  language navigation, the heading structure, each table's row and column count, every code block's command
+  lines and the set of link targets; how the page itself is ordered is in
+  [.github/memory/documentation-style.md](.github/memory/documentation-style.md).
 
 ## Commits and pull requests
 

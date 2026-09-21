@@ -11,7 +11,7 @@ metadata:
 
 | Topic | One-liner | When to read |
 |---|---|---|
-| [documentation-style](documentation-style.md) | Repository documentation writing rules: indexes only route, topics carry the body, frontmatter shape, honest labeling and resolvable links | Before adding/changing a topic file, an index row, AGENTS.md or SKILL.md |
+| [documentation-style](documentation-style.md) | Repository documentation writing rules: indexes only route, topics carry the body, frontmatter shape, honest labeling and resolvable links; and the three README front pages, which are one document in three languages | Before adding/changing a topic file, an index row, AGENTS.md, SKILL.md or one of the three READMEs |
 | [agent-reporting](agent-reporting.md) | Agent reporting rules: conclusion first, distinguish verified/inferred/unverified, report the command verbatim and its result | Any time you report a conclusion, run a gate, or wrap up after changing files |
 
 ## Related but not in this category

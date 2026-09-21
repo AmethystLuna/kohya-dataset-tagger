@@ -12,69 +12,50 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
 </p>
 
-A standalone dataset tagger for **kohya-style training sets** - LoRA / full finetune / DreamBooth all use the same `image_dir` + `.txt` sidecar format. Do the whole chain in the browser:
+A standalone tagger for **kohya-style training sets**. LoRA, full finetune and DreamBooth all use the same `image_dir` + `.txt` sidecar layout, and the whole chain runs in the browser:
 
-**directory browsing → gallery preview → per-image tag editing → tag filtering → batch WD14 captioning → generate a trainable dataset.toml**
+**browse the directory → preview the gallery → edit tags per image → filter by tag → batch-caption with WD14 → generate a trainable `dataset.toml`**
 
-It is a **companion tool** to **Anima-Standalone-Trainer** (a sibling project, not published here), not a plugin for it:
-its own repository, its own process, its own page, interacting with the trainer only through the filesystem contract (the dataset directory, `dataset.toml`, the training cache).
+It is a companion tool to **Anima-Standalone-Trainer**, not a plugin: its own repository, its own process, its own page, and nothing shared with the trainer but the filesystem contract (the dataset directory, `dataset.toml`, the training cache).
 
 ## Status
 
-**V0.1 · P0 complete**. Backend, frontend, tagger, model download, and dataset.toml generation have all landed and passed the P0 acceptance round.
+**V0.1 · P0 complete.** Backend, frontend, tagger, model download and `dataset.toml` generation have all landed and passed the P0 acceptance round.
 
-    pytest test/ -q -n auto -m "not network"   1072 passed, 31 skipped   # a fresh clone: the committed sample dataset, no tagger model
-    pytest test/test_docs_index.py -q          9 passed
-
-Every path the tests need comes from `local_paths.ini` (gitignored, with a committed template); the
-criteria whose subject cannot exist - a real training set, a downloaded tagger model, the real
-vocabulary - **skip themselves and say so**, which is why a fresh clone is green. The acceptance suite is
-the independent one and is scored against the trainer's own `config_util`; it stays a local gate rather
-than a published number. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Two things it knows that the trainer will not tell you
-
-These two are the reason this tool exists, and what sets it apart from "hand-writing the config":
-
-**① After you change a caption, the trainer does not rebuild the text encoder cache.**
-
-It will **silently keep training with the old tags**, with no error at all.
-So this tool's number-one feature is not "editing" but **making the cache right after the edit** -
-every write to a `.txt` also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`,
-and if it cannot delete it, it raises an error rather than **swallowing** it.
-Evidence and post-mortem: [.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md)
-
-**② The trainer's image enumeration is not recursive.**
-
-`glob_images()` scans only one level, so when `image_dir` points at a parent directory **the training set is empty**.
-A training set here is a few hundred subdirectories, so it must be **one subset per directory**.
-The generator produces exactly that, and it passes acceptance against **the trainer's own config validator**
-([tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)).
-
-Along the way it reports six classes of problem that the trainer accepts silently: missing captions, a caption containing `\,` (which gets read as two tags),
-images larger than `max_bucket_reso`, images with alpha, too few images, and empty directories.
-
-## Quick start
-
-**Two commands.** The first time:
-
-```cmd
-setup_env.bat
+```text
+pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # a fresh clone: the sample dataset, no tagger model
+pytest test/test_docs_index.py -q          15 passed
 ```
 
-Then every time:
+Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose subject is missing - a real training set, a downloaded model, the real vocabulary - skips itself and says so, which is why a fresh clone is green. The acceptance suite is written independently and scored by the trainer's own `config_util`; it needs a real dataset and a trainer checkout, so it stays a local gate. [CONTRIBUTING.md](CONTRIBUTING.md) lists what CI runs.
 
-```cmd
-start.bat
-```
+## What the trainer will not tell you
 
-`start.bat` does all of this by itself before opening the browser:
+Two failures stay silent, and each one costs a training run.
 
-- If there is no `.venv`, it asks whether to initialize first
-- The first time it asks once for the **dataset root directory** and stores it in `roots.txt` (gitignored), never asking again
-- If the port is taken it moves on automatically (3001 → 3002 → …)
-- **It opens the browser only once the service is actually ready**, so you never get a page that cannot connect
-- The service runs in the foreground; Ctrl+C ends it
+**① A caption write does not rebuild the text encoder cache.** The trainer keeps training on the old tags and reports nothing, so this tool's job is not the edit but the cache: every `.txt` write also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`, and a cache that cannot be deleted is an error rather than something swallowed. Evidence and post-mortem: [.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md).
+
+**② The trainer's image enumeration is not recursive.** `glob_images()` scans one level, so an `image_dir` pointing at a parent directory trains on an empty set. A real training set is a few hundred subdirectories, so this tool writes **one subset per directory** - and acceptance scores the result with the trainer's own config validator ([tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)).
+
+Along the way it reports six classes of problem that the trainer accepts silently: a missing caption, a caption containing `\,` (read as two tags), an image larger than `max_bucket_reso`, an image with alpha, too few images, and an empty directory.
+
+## Install and run
+
+| Task | Windows | Linux / macOS |
+|---|---|---|
+| First time: create the environment | `setup_env.bat` | `./setup_env.sh` |
+| Every time: start and open the browser | `start.bat` | `./start.sh` |
+| The same two, from the China mirrors | `setup_env_cn.bat` | `./setup_env_cn.sh` |
+
+Before the page opens, the launcher
+
+- initialises `.venv` if it is missing, and asks first;
+- asks once for the dataset root directory and stores it in `roots.txt` (gitignored), so it never asks again;
+- moves to the next free port when one is taken (3001 → 3002 → …);
+- opens the browser only once the service answers, so you never land on a page that cannot connect;
+- runs in the foreground, and Ctrl+C stops it.
+
+Both launcher sets accept `--dry-run`: print the command lines, start nothing.
 
 You do not have to use the launcher:
 
@@ -83,33 +64,7 @@ You do not have to use the launcher:
 .\scripts\start.ps1 -NoBrowser
 ```
 
-Linux / macOS are **two scripts for the same thing, placed symmetrically at the root**:
-
-```bash
-./setup_env.sh       # idempotent; installs the CUDA build of onnxruntime if nvidia-smi exists, otherwise the CPU build
-./start.sh           # reads the same roots.txt, picks a free port, opens the browser once the service is ready
-```
-
-Both accept `--dry-run`: print the command lines that would be executed and exit without starting anything.
-
-**On mainland-China networks** use the China-mirror profile (the same implementation, only the package source differs):
-
-```cmd
-setup_env_cn.bat
-```
-
-```bash
-./setup_env_cn.sh
-```
-
-It falls back through the sources in the order `USTC → Aliyun → pypi.org` (moving to the next only when the previous one fails), so it installs even when a mirror is temporarily down.
-Measured (2026-09-19, 245 MB onnxruntime-gpu): USTC **8.4–11 MB/s**, Aliyun 0.86–1.25 MB/s,
-pypi.org 0.55–1.01 MB/s. To use a different mirror: set `KOHYA_TAGGER_PIP_INDEX=https://your/simple`
-(comma-separated for several, falling back in order).
-
-**The only dependency is a dedicated venv** (about 250 MB), **torch is not needed**, and do not install anything into the trainer's venv.
-
-Other uses of `setup_env.bat` (equivalent to `scripts\setup_env.ps1`):
+The environment scripts take flags of their own:
 
 ```powershell
 .\setup_env.bat -Gpu cuda        # use the CUDA EP (needs torch or the nvidia runtime)
@@ -119,119 +74,115 @@ Other uses of `setup_env.bat` (equivalent to `scripts\setup_env.ps1`):
 .\setup_env.bat -Recreate        # rebuild the venv (prints the absolute path and asks for confirmation first)
 ```
 
+The only dependency is this repository's own `.venv` (about 250 MB). **torch is not needed**, and nothing should go into the trainer's venv.
+
+**On a mainland-China network** use `setup_env_cn.*`: same implementation, different package sources. It tries `USTC → Aliyun → pypi.org` in order, moving on only when the previous one fails, so a mirror being down does not stop the install. Measured on 2026-09-19 while fetching the 245 MB `onnxruntime-gpu`: USTC 8.4–11 MB/s, Aliyun 0.86–1.25 MB/s, pypi.org 0.55–1.01 MB/s. For another mirror set `KOHYA_TAGGER_PIP_INDEX=https://your/simple` (comma-separated for several, tried in order).
+
 ## GPU
 
-Measured on this machine (RTX 4070 Ti SUPER, 16 real images, median after warm-up):
+onnxruntime decides the speed, so the Windows setup scripts install the **DirectML** build by default: 50 MB, self-contained, vendor-agnostic, no CUDA or cuDNN needed. Measured on the reference machine (RTX 4070 Ti SUPER, 16 images, median after warm-up):
 
-| provider | median | 1653 images |
+| provider | per image | a 1653-image dataset |
 |---|---|---|
-| CPU | 0.721 s/image | 19.9 minutes |
-| **DirectML** (default) | **0.192 s/image** | **5.3 minutes** |
-| CUDA | 0.168 s/image | 4.6 minutes |
+| CPU | 0.721 s | 19.9 minutes |
+| **DirectML** (default) | **0.192 s** | **5.3 minutes** |
+| CUDA | 0.168 s | 4.6 minutes |
 
-DirectML is the default on Windows: 50 MB, self-contained, vendor-agnostic, no CUDA/cuDNN needed.
-CUDA is 14% faster but costs 195 MB more plus a torch dependency.
-**Installing onnxruntime must pin `--index-url` explicitly** (both setup scripts already do this):
-falling back to the global pip index can be so slow it "looks hung" (0.07 MB/s measured on this machine). The regular profile uses `pypi.org`,
-the China profile (`setup_env_cn.*`) falls back through USTC → Aliyun → pypi.org.
+CUDA is 14% faster and costs 195 MB more plus a torch dependency, which is why it is not the default on Windows.
 
-Always use it for the post-install self-check, and **do not** trust `get_available_providers()` -
-when a provider fails to load, onnxruntime **silently falls back to CPU**, and inference still runs, just 4× slower:
+An onnxruntime install must pin `--index-url` (both setup scripts already do): the global pip index can be slow enough to look hung - 0.07 MB/s measured on the reference machine. Then check what you actually got, because `get_available_providers()` is not the answer:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\check_provider.py    # builds a session with a real model and reports the **actual** provider
+.\.venv\Scripts\python.exe tools\check_provider.py    # builds a session with a real model and reports the provider in use
 ```
 
-## Model download
+A provider that fails to load makes onnxruntime **fall back to CPU silently**: inference still runs, four times slower.
 
-If a tagger model is not available locally when you select it, it is downloaded automatically. Endpoint order
-`KOHYA_TAGGER_HF_ENDPOINT` → `huggingface.co` → `hf-mirror.com` (a China mirror; its manifest has been verified to match the main site word for word).
+## Tagger models
 
-**The easiest way is to change it in the UI** (see the next section): tagger panel → "Model directory…", and additions **take effect immediately**,
-no restart needed, and get written to `model_paths.txt`. Three other equivalent ways:
+Selecting a model that is not on disk downloads it, trying `KOHYA_TAGGER_HF_ENDPOINT` → `huggingface.co` → `hf-mirror.com` (a China mirror whose manifest was verified to match the main site).
+
+Search roots are used in this order, and the first match wins for a duplicate model name:
+
+1. `models/` in this repository - the first root, and the default download destination
+2. directories you added (`model_paths.txt`, then `--extra-models` / `KOHYA_TAGGER_EXTRA_MODELS`)
+3. `%LOCALAPPDATA%/kohya-dataset-tagger/models` - the app's own download directory
+4. the HuggingFace cache, last
+
+**Adding a directory is easiest in the UI**: tagger panel → "Model directories…" → paste an absolute path. The entry takes effect immediately, with no restart, and is written back to `model_paths.txt`. Three equivalents:
 
 ```powershell
-# 1. Write it into model_paths.txt (recommended; one per line, # starts a comment, semicolons also work) - the server reads it at startup
+# 1. Edit model_paths.txt (one path per line; # starts a comment, semicolons also separate) - read at startup
 # 2. Environment variable (appends, does not replace):
 set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
-# 3. Run the CLI directly (the launcher has **no** -ExtraModels argument, do not copy old docs):
+# 3. Run the CLI directly (the launcher has no -ExtraModels argument):
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> `scripts\start.ps1` / `scripts\start.sh` only "pick a port + read roots.txt + start the service";
-> model search directories are **not forwarded by the launcher** (§3.7) - if they were turned into command-line arguments, a line deleted in the UI
-> would be pushed back on the next start.
+> `scripts\start.ps1` / `scripts\start.sh` only pick a port, read `roots.txt` and start the service; they do not forward model directories (§3.7). As command-line arguments they would push a line you deleted in the UI back on the next start.
 
-Note the difference from `--models` / `KOHYA_TAGGER_MODELS`: **that replaces the whole search list** (setting it drops
-the repository `models/` and all auto-discovered locations), while **this appends** - "add one more directory" wants the latter.
+`--models` / `KOHYA_TAGGER_MODELS` is the other one: it **replaces** the whole search list, dropping the repository's `models/` and every auto-discovered location. "Add one more directory" wants the append above.
 
-The **order of search roots is the priority**: repository `models/` → the ones you added (`model_paths.txt`) → the ones we downloaded → the HF cache.
-Explicitly specified ones always come before auto-discovered ones.
-The default list contains **no** paths that exist only on one machine - wherever your webui / ComfyUI models are, write them into `model_paths.txt`.
+The default list holds no path that exists on only one machine. Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
 
-**It does not matter if the download will not work**: put `model.onnx` and the `*.csv` from the same directory into the repository's
+**A download that cannot happen is not a dead end**: put `model.onnx` and the `*.csv` from the same repository into
 
-    models/<model-id>/
+```text
+models/<model-id>/
+```
 
-(that directory has a placeholder file whose filename is exactly this sentence). It is **position 0 of the default search root**
-and also **the download destination** - what you place by hand and what is downloaded automatically live in the same place, with no second copy.
+a directory that already holds a placeholder file whose file name says exactly that. It is the first search root and the default download destination, so what you place by hand and what the app downloads live in the same place.
 
-## Switching datasets / adding model directories: no restart
+## Datasets and model directories without a restart
 
-Both kinds of path used to be configurable only through command-line arguments or a config file, **and were read once at startup**. Now both can be changed in the UI, taking effect immediately:
+Both kinds of path used to be settable only from the command line or a config file, and were read once at startup. Both are now editable in the UI, with immediate effect:
 
-| What you want to do | Where | Effect |
+| What you want | Where | Effect |
 |---|---|---|
-| Switch / add a dataset directory | the **+** next to the "Roots" title in the left column | browsable immediately; written back to `roots.txt` |
-| Remove a dataset directory | the **×** after each root | the last one cannot be deleted (with none left, nothing opens) |
-| Add a model scan directory | tagger panel → "Model directory…" | appears in the model dropdown immediately; written back to `model_paths.txt` |
-| Remove a model scan directory | "Remove" on each entry in the same dialog | the auto-discovered ones apply only to this run; the UI says so |
+| Switch or add a dataset directory | the **+** next to the "Root directories" title in the left column | browsable immediately; written back to `roots.txt` |
+| Remove a dataset directory | "Remove" after each root | the last one cannot be removed (with none left, nothing opens) |
+| Add a model search directory | tagger panel → "Model directories…" | in the model list immediately; written back to `model_paths.txt` |
+| Remove a model search directory | "Remove" on each entry in the same dialog | auto-discovered entries last for this run only, and the UI says so |
 
-Browsers cannot give you a native directory picker, so **paste an absolute path** (opening a "list any directory" endpoint just for this one control would void the allowlist). The directory must already exist - configuring a nonexistent root only makes every request 403/404.
+A browser cannot hand you a native directory picker, so **paste an absolute path**. (An endpoint that lists any directory at all, for this one control, would void the allowlist.) The directory must already exist: a root that does not only makes every request 403 or 404.
 
-When writing the file fails the feature **still works**, but the UI says outright "this entry will be lost after a restart" rather than pretending it succeeded.
-
-## Acceptance
-
-`pytest acceptance/` holds criteria **written independently against the spec**, not by the implementer. A23 among them is scored by **the real consumer**:
-it feeds the generated `dataset.toml` to the trainer's own `config_util` and requires it to build one subset per directory.
+When the file cannot be written the feature **still works**, but the UI says "this entry will be lost after a restart" instead of pretending it was saved.
 
 ## Development
 
-Read [AGENTS.md](AGENTS.md) first - the resident index pointing into the second-level indexes under `.github/memory/`.
-The working procedure is in [.agents/skills/kohya-dataset-tagger-workflow/SKILL.md](.agents/skills/kohya-dataset-tagger-workflow/SKILL.md).
+Read [AGENTS.md](AGENTS.md) first - the resident index into `.github/memory/`. The working procedure is [.agents/skills/kohya-dataset-tagger-workflow/SKILL.md](.agents/skills/kohya-dataset-tagger-workflow/SKILL.md).
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_relevant.py          # inner loop: only the tests that cover the change
 .\.venv\Scripts\python.exe tools\check_relevant.py --full   # the gate before reporting: full suite + documentation gate
-.\.venv\Scripts\python.exe -m pytest test/ -q -n auto       # the full unit suite, across cores
+.\.venv\Scripts\python.exe -m pytest test/ -q -n auto       # the full unit suite
 .\.venv\Scripts\python.exe -m pytest acceptance/ -q         # acceptance criteria (needs a real dataset)
-.\.venv\Scripts\python.exe tools\e2e_smoke.py               # real HTTP end to end (requires a running service)
-.\.venv\Scripts\python.exe tools\dataset_manifest.py --root "<dataset>" --out snapshot.json   # store your own fingerprint
 ```
 
-`local_paths.ini` is where a checkout finds its own training set, models and trainer; the committed
-template points at the sample dataset under `test/fixtures/sample_dataset/`, so the suite runs as it is.
-[CONTRIBUTING.md](CONTRIBUTING.md) explains the keys and lists what the CI jobs run:
-[.github/workflows/ci.yml](.github/workflows/ci.yml) covers Linux and Windows, and leaves the criteria
-that talk to huggingface.co to a weekly scheduled run.
+### Where the tests get their data
 
-## Documentation layout
+`local_paths.ini` is how a checkout finds its own training set, models and trainer; the committed template `local_paths.ini.example` points at the sample dataset under `test/fixtures/sample_dataset/`, so the suite runs as it is. [CONTRIBUTING.md](CONTRIBUTING.md) lists the keys.
 
-    AGENTS.md                          resident index (≤ 28 KB, gate-enforced)
-    .github/memory/MEMORY.md           category table
-    .github/memory/INDEX-<category>.md topic lists
-    .github/memory/<topic>.md          bodies
-    .github/memory/p0-spec.md          **P0 frozen contract and acceptance criteria** (must read before changing code)
-    .agents/skills/<name>/SKILL.md     working procedure
+### Acceptance
 
-`test/test_docs_index.py` keeps this structure from rotting: budget, reachable links, no orphan topics, skill compliance.
+`pytest acceptance/` holds the criteria written independently against the spec. A23 is scored by the real consumer: the generated `dataset.toml` goes to the trainer's own `config_util`, which must build one subset per directory. That needs a real dataset and a trainer checkout, so it is a local gate.
+
+### Documentation layout
+
+| Path | What it is |
+|---|---|
+| `AGENTS.md` | the resident index (≤ 28 KB, gate-enforced) |
+| `.github/memory/MEMORY.md` | the category table |
+| `.github/memory/INDEX-<category>.md` | one topic list per category |
+| `.github/memory/<topic>.md` | the bodies |
+| `.github/memory/p0-spec.md` | the frozen P0 contract and acceptance criteria |
+| `.agents/skills/<name>/SKILL.md` | the working procedure |
+
+`test/test_docs_index.py` keeps this structure from rotting: budget, resolvable links, no orphan topics, skill compliance, and the three READMEs in step.
 
 ## Contributing
 
-Issues and pull requests are welcome, in English or Chinese. [CONTRIBUTING.md](CONTRIBUTING.md) has the
-setup, the two-tier gate, the rules a change has to respect, and what CI runs. Security problems go
-through [SECURITY.md](SECURITY.md); the project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+Issues and pull requests are welcome, in English or Chinese. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the two-tier gate, the rules a change has to respect and what CI runs. Security problems go through [SECURITY.md](SECURITY.md); the project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## License
 

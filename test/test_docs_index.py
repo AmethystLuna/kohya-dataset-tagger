@@ -18,6 +18,10 @@ Checks (scan returns **every** problem it finds, not just the first)
  5. Every `.agents/skills/<name>/SKILL.md` has spec-compliant frontmatter: spec fields only,
     `name` equal to the directory name and matching lowercase-hyphen syntax, `description`
     non-empty and not too long, and a non-empty body.
+ 6. The three front pages (`README.md`, `README.zh-CN.md`, `README.ja.md`) stay in step: one
+    centred language navigation under the title, the same heading structure, the same tables, the
+    same commands inside the same code blocks, and the same link targets. Only the prose and the
+    comments inside code blocks are translated - a command or a path is not.
 
 This repository has **no** `CLAUDE.md` bridge file, so there is no "bridge budget" rule -
 AGENTS.md is the single source of truth for resident instructions.
@@ -53,6 +57,10 @@ SPEC_FIELDS = frozenset(
 SPEC_SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 NAME_MAX_CHARS = 64
 DESCRIPTION_MAX_CHARS = 1024
+
+#: The three front pages, in navigation order. Editing one is editing all three.
+README_FILES = ("README.md", "README.zh-CN.md", "README.ja.md")
+README_NAV_ORDER = ("README.zh-CN.md", "README.md", "README.ja.md")
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 SKIP_PREFIXES = ("http://", "https://", "mailto:", "#", "page:")
@@ -162,6 +170,148 @@ def scan_skills(root: Path) -> list[str]:
     return problems
 
 
+# --------------------------------------------------------------------------
+# Rule 6: the three front pages
+# --------------------------------------------------------------------------
+
+HREF_RE = re.compile(r'href="([^"]+)"')
+
+
+def _readme_head(text: str):
+    """`(title, navigation block)` - the `<h1>` and the centred `<p>` directly below it, or None."""
+    match = re.match(r"\A<h1[^>]*>(.*?)</h1>[ \t]*\n+(<p[^>]*>.*?</p>)", text, re.S)
+    if match is None:
+        return None
+    return match.group(1).strip(), match.group(2).strip()
+
+
+def _heading_shape(text: str) -> tuple:
+    """The sequence of `##` / `###` levels: a language-independent skeleton, so it must match."""
+    return tuple(len(match.group(1)) for match in re.finditer(r"^(#{2,3}) .+$", text, re.M))
+
+
+def _tables(text: str) -> tuple:
+    """`(rows, columns)` of every markdown table, in order. Cells are translated; the shape is not."""
+    tables: list = []
+    run: list = []
+    for line in text.splitlines() + [""]:
+        if line.lstrip().startswith("|"):
+            run.append(line)
+        elif run:
+            tables.append((len(run), run[0].count("|") - 1))
+            run = []
+    return tuple(tables)
+
+
+def _without_comment(line: str) -> str:
+    """A code line with its trailing comment removed - the part that must not be translated."""
+    stripped = line.rstrip()
+    match = re.search(r"(?:^|\s)#", stripped)
+    return (stripped[: match.start()] if match else stripped).rstrip()
+
+
+def _code_blocks(text: str) -> tuple:
+    """Every fenced block as its non-empty command lines (comments and blank lines dropped)."""
+    blocks: list = []
+    current: list = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            if inside:
+                blocks.append(tuple(c for c in map(_without_comment, current) if c))
+                current = []
+            inside = not inside
+            continue
+        if inside:
+            current.append(line)
+    return tuple(blocks)
+
+
+def _first_difference(left, right):
+    for index, (a, b) in enumerate(zip(left, right)):
+        if a != b:
+            return index
+    return None
+
+
+def scan_readmes(root: Path) -> list:
+    """Rule 6: the front page exists three times, and the copies must not drift apart.
+
+    What is compared is what a reader cannot translate away: the navigation, the skeleton, the
+    tables' shape, the commands and the link targets. The prose and the comments inside code
+    blocks are expected to differ - that is the point of three files.
+    """
+    problems: list = []
+    texts: dict = {}
+    for name in README_FILES:
+        path = root / name
+        if not path.is_file():
+            problems.append("%s is missing" % name)
+        else:
+            texts[name] = path.read_text(encoding="utf-8")
+    if len(texts) < 2:
+        return problems
+
+    navigations: dict = {}
+    for name, text in texts.items():
+        head = _readme_head(text)
+        if head is None:
+            problems.append(
+                "%s does not open with an <h1> and the centred language navigation" % name
+            )
+            continue
+        navigations[name] = head[1]
+        hrefs = HREF_RE.findall(head[1])
+        if hrefs != list(README_NAV_ORDER):
+            problems.append(
+                "%s language navigation links %s - expected %s in that order"
+                % (name, hrefs, list(README_NAV_ORDER))
+            )
+    if len(set(navigations.values())) > 1:
+        problems.append(
+            "the language navigation differs between the front pages: %s"
+            % ", ".join(sorted(navigations))
+        )
+
+    reference = README_FILES[0] if README_FILES[0] in texts else sorted(texts)[0]
+    for label, shape_of in (
+        ("heading structure", _heading_shape),
+        ("tables", _tables),
+        ("code blocks", _code_blocks),
+    ):
+        shapes = {name: shape_of(text) for name, text in texts.items()}
+        expected = shapes[reference]
+        for name, shape in sorted(shapes.items()):
+            if name == reference or shape == expected:
+                continue
+            index = _first_difference(shape, expected)
+            if index is None:
+                detail = "%d vs %d entries" % (len(shape), len(expected))
+            else:
+                detail = "position %d: %r vs %r" % (index, shape[index], expected[index])
+            problems.append("%s %s differs from %s (%s)" % (name, label, reference, detail))
+
+    targets = {name: sorted(set(_links(text))) for name, text in texts.items()}
+    expected_targets = targets[reference]
+    for name, found in sorted(targets.items()):
+        if name != reference and found != expected_targets:
+            problems.append(
+                "%s and %s link to different targets (+%s / -%s)"
+                % (
+                    name,
+                    reference,
+                    sorted(set(found) - set(expected_targets)),
+                    sorted(set(expected_targets) - set(found)),
+                )
+            )
+    for name, text in sorted(texts.items()):
+        for target in _links(text):
+            if not (root / target).exists():
+                problems.append("%s links to missing %s" % (name, target))
+
+    return problems
+
+
 def scan(root: Path) -> list[str]:
     """Return every structural problem in this documentation tree (empty list = clean)."""
     problems: list[str] = []
@@ -234,6 +384,9 @@ def scan(root: Path) -> list[str]:
     # Rule 5: skill spec
     problems.extend(scan_skills(root))
 
+    # Rule 6: the three front pages stay in step
+    problems.extend(scan_readmes(root))
+
     return problems
 
 
@@ -241,7 +394,29 @@ def scan(root: Path) -> list[str]:
 # Miniature documentation tree: used to falsify each rule
 # --------------------------------------------------------------------------
 
+#: The miniature front pages: three copies of one skeleton, exactly as the real ones must be.
+def _mini_readme(prose: str, comment: str) -> str:
+    return (
+        '<h1 align="center">Mini</h1>\n\n'
+        '<p align="center">\n'
+        '  <a href="README.zh-CN.md">zh</a> ·\n'
+        '  <a href="README.md">en</a> ·\n'
+        '  <a href="README.ja.md">ja</a>\n'
+        '</p>\n\n'
+        "## Status\n\n"
+        + prose
+        + "\n\n```text\nmini --flag   # "
+        + comment
+        + "\n```\n\n"
+        "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+        "See [topic-a](.github/memory/topic-a.md).\n"
+    )
+
+
 MINI_FILES = {
+    "README.md": _mini_readme("the English page", "english note"),
+    "README.zh-CN.md": _mini_readme("the Chinese page", "中文注释"),
+    "README.ja.md": _mini_readme("the Japanese page", "日本語の注記"),
     "AGENTS.md": (
         "# AGENTS\n\n"
         "| scope | [INDEX-a.md](.github/memory/INDEX-a.md) | covers a |\n"
@@ -373,3 +548,61 @@ def test_skill_missing_description_is_detected(tmp_path: Path) -> None:
         "---\nname: skill-a\n---\n\nbody\n",
     )
     _assert_problem(scan(tmp_path), "has no description")
+
+def test_readme_navigation_drift_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(
+        tmp_path,
+        "README.ja.md",
+        MINI_FILES["README.ja.md"].replace('  <a href="README.ja.md">ja</a>\n', ""),
+    )
+    _assert_problem(scan(tmp_path), "language navigation")
+
+
+def test_readme_section_drift_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(tmp_path, "README.md", MINI_FILES["README.md"] + "\n## Extra\n\nthe English page only\n")
+    _assert_problem(scan(tmp_path), "heading structure differs")
+
+
+def test_readme_table_drift_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(
+        tmp_path,
+        "README.zh-CN.md",
+        MINI_FILES["README.zh-CN.md"].replace("| 1 | 2 |\n", "| 1 | 2 |\n| 3 | 4 |\n"),
+    )
+    _assert_problem(scan(tmp_path), "tables differs")
+
+
+def test_readme_command_drift_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(
+        tmp_path,
+        "README.ja.md",
+        MINI_FILES["README.ja.md"].replace("mini --flag", "mini --other"),
+    )
+    _assert_problem(scan(tmp_path), "code blocks differs")
+
+
+def test_readme_link_drift_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(
+        tmp_path,
+        "README.md",
+        MINI_FILES["README.md"].replace(
+            "See [topic-a](.github/memory/topic-a.md).", "See the topic."
+        ),
+    )
+    _assert_problem(scan(tmp_path), "link to different targets")
+
+
+def test_broken_link_in_a_front_page_is_detected(tmp_path: Path) -> None:
+    _build_mini(tmp_path)
+    _write(
+        tmp_path,
+        "README.md",
+        MINI_FILES["README.md"].replace("(.github/memory/topic-a.md)", "(nowhere.md)"),
+    )
+    _assert_problem(scan(tmp_path), "README.md links to missing nowhere.md")
+

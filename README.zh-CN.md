@@ -37,8 +37,8 @@ pytest test/test_docs_index.py -q          15 passed
 
 打开页面之前，启动器会
 
-- 没有 `.venv` 就先问你要不要初始化；
-- 第一次问你一次数据集根目录，存进 `roots.txt`（已 gitignore），以后不再问；
+- 没有 `.venv` 就先问要不要初始化；
+- 首次询问数据集根目录，存进 `roots.txt`（已 gitignore），以后不再问；
 - 端口被占用就换下一个（3001 → 3002 → …）；
 - 服务真的应答之后才打开浏览器，所以不会出现打不开的页面；
 - 在前台运行，Ctrl+C 结束。
@@ -93,7 +93,7 @@ CUDA 快 14%，代价是多 195 MB 外加一个 torch 依赖。
 搜索根按下面的顺序使用，同名模型取最前面的：
 
 1. 本仓库的 `models/`——第一个搜索根，也是默认下载目的地
-2. 你自己加的目录（`model_paths.txt`，然后是 `--extra-models` / `KOHYA_TAGGER_EXTRA_MODELS`）
+2. 自己加的目录（`model_paths.txt`，然后是 `--extra-models` / `KOHYA_TAGGER_EXTRA_MODELS`）
 3. `%LOCALAPPDATA%/kohya-dataset-tagger/models`——程序自己的下载目录
 4. HuggingFace 缓存，排在最后
 
@@ -109,7 +109,7 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 
 `--models` / `KOHYA_TAGGER_MODELS` 是另一个开关：它**替换整个搜索列表**，仓库的 `models/` 和所有自动发现的位置都会一起丢掉，所以「再加一个目录」用上面的追加。
 
-你的 webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
+webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
 
 **不想下载模型**：把同一个仓库的 `model.onnx` 和 `*.csv` 放进
 
@@ -123,7 +123,7 @@ models/<model-id>/
 
 这两类路径都能在界面里改，立即生效：
 
-| 你想做什么 | 在哪里 | 效果 |
+| 要做什么 | 在哪里 | 效果 |
 |---|---|---|
 | 切换或添加数据集目录 | 左栏「根目录」标题旁的 **＋** | 立刻可浏览；写回 `roots.txt` |
 | 删除数据集目录 | 每个根目录后面的「删除」 | 最后一个删不掉（一个都不剩就打不开任何东西） |

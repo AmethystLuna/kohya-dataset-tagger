@@ -37,7 +37,7 @@ Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose su
 
 Before the page opens, the launcher
 
-- initialises `.venv` if it is missing, and asks first;
+- if `.venv` is missing, asks whether to initialise it;
 - asks once for the dataset root directory and stores it in `roots.txt` (gitignored), so it never asks again;
 - moves to the next free port when one is taken (3001 → 3002 → …);
 - opens the browser only once the service answers, so you never land on a page that cannot connect;
@@ -62,7 +62,7 @@ The environment scripts take flags of their own:
 .\setup_env.bat -Recreate        # rebuild the venv (prints the absolute path and asks for confirmation first)
 ```
 
-The only dependency is this repository's own `.venv` (about 250 MB). **torch is not needed**, and nothing should go into the trainer's venv.
+The only dependency is this repository's own `.venv` (about 250 MB). **torch is not needed.** Do not install anything into the trainer's venv.
 
 **On a mainland-China network** use `setup_env_cn.*`: same implementation, different package sources. It tries `USTC → Aliyun → pypi.org` in order, moving on only when the previous one fails, so a mirror being down does not stop the install. Measured on 2026-09-19 while fetching the 245 MB `onnxruntime-gpu`: USTC 8.4–11 MB/s, Aliyun 0.86–1.25 MB/s, pypi.org 0.55–1.01 MB/s. For another mirror set `KOHYA_TAGGER_PIP_INDEX=https://your/simple` (comma-separated for several, tried in order).
 
@@ -107,7 +107,7 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-`--models` / `KOHYA_TAGGER_MODELS` is the other flag: it **replaces** the whole search list, the repository's `models/` and every auto-discovered location included, so adding one directory wants the append above.
+`--models` / `KOHYA_TAGGER_MODELS` is the other flag: it **replaces** the whole search list, the repository's `models/` and every auto-discovered location included, so to add one directory, use the append above.
 
 Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
 
@@ -130,7 +130,7 @@ Both kinds of path are editable in the UI, with immediate effect:
 | Add a model search directory | tagger panel → "Model directories…" | in the model list immediately; written back to `model_paths.txt` |
 | Remove a model search directory | "Remove" on each entry in the same dialog | auto-discovered entries last for this run only, and the UI says so |
 
-**Paste an absolute path**: a browser has no native directory picker, and the directory must already exist - a root that does not only makes every request 403 or 404.
+**Paste an absolute path**: a browser has no native directory picker, and the directory must already exist - a root that does not exist only makes every request 403 or 404.
 
 When the file cannot be written the feature **still works**, and the UI says "this entry will be lost after a restart".
 

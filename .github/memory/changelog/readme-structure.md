@@ -121,6 +121,26 @@ That last class is the interesting one: **rule 6 would not have caught it.** It 
 with each other, and the damage would have been identical in all three. One idea was kept: the Chinese
 sentence about the provider now names its referent ("session 实际用的是哪个提供程序").
 
+## A second round with a stronger model (2026-09-21)
+
+The same three files were then dispatched to `deepseek-v4-pro` as a self-contained brief (scope, audience, the
+writing rules, the gate's invariants, the local model's four failure modes, and "do not commit"). It changed
+nine prose lines and every one was kept:
+
+- the English bullet "initialises `.venv` if it is missing, and asks first" had a dangling "asks first"; it
+  became "if `.venv` is missing, asks whether to initialise it", which is what `scripts/start.ps1:50` really
+  asks ("Run scripts\setup_env.ps1 to initialize now? (Y/n)");
+- "nothing should go into the trainer's venv" became its own imperative sentence;
+- "so adding one directory wants the append above" lost the personified verb;
+- **it restored a word I had dropped**: "a root that does not only makes every request 403 or 404" became
+  "a root that does not exist ..." - the rewrite earlier the same day had eaten "exist";
+- three second-person pronouns left the Chinese prose, and one Japanese bullet became one sentence.
+
+**Review added two more**: "第一次问一次数据集根目录" -> "首次询问数据集根目录" (the doubled 一次), and the table
+header 「你想做什么」 -> 「要做什么」, so the Chinese page is now pronoun-free from end to end, like the zh UI pack.
+It also flagged the one thing it was unsure about - that the no-你 rule is written for the UI pack, not the
+README - and left that decision to me instead of guessing.
+
 ## Evidence
 
 - \`python -m pytest test/test_docs_index.py -q\` → **15 passed** (9 before: 6 new criteria).

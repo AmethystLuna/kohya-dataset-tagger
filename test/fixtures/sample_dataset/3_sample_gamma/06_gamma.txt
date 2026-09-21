@@ -1,0 +1,1 @@
+scenery, no_humans, sky

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report (private)
+    url: https://github.com/AmethystLuna/kohya-dataset-tagger/security/advisories/new
+    about: Do not open a public issue for a vulnerability - see SECURITY.md first.
+  - name: How to run the tests and the gates
+    url: https://github.com/AmethystLuna/kohya-dataset-tagger/blob/main/CONTRIBUTING.md
+    about: Setup, the inner loop, the full gate, and what a pull request has to pass.

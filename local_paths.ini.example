@@ -1,0 +1,34 @@
+# Where the machine-local paths live - copy this file to local_paths.ini and edit that one.
+#
+#   cp local_paths.ini.example local_paths.ini        (Windows: copy local_paths.ini.example local_paths.ini)
+#
+# local_paths.ini is **gitignored**: it is the only place a personal path belongs. This template is
+# committed, and its defaults point inside this repository, so a fresh clone runs without any setup:
+# the criteria read the sample dataset under test/fixtures/sample_dataset/ and the models/ directory,
+# and the ones that need a downloaded tagger model or a real vocabulary skip themselves and say so.
+#
+# Relative paths resolve against the repository root. Separate several entries with the platform's
+# path separator (";" on Windows, ":" elsewhere). An empty value means "not configured".
+
+[paths]
+
+# A kohya-style dataset directory (one subdirectory per subset, .txt sidecars beside the images).
+# Everything that reads real data uses this; nothing in the criteria ever writes to it.
+dataset = test/fixtures/sample_dataset
+
+# Where tagger models are looked for: either <root>/<model_id>/model.onnx or the HuggingFace cache
+# layout (<root>/models--<org>--<name>/snapshots/*/model.onnx), with any *.csv beside the onnx.
+models = models
+
+# A HuggingFace cache holding the real WD14 vocabulary, e.g. ~/.cache/huggingface/hub.
+# The criteria that assert against the real 10861-row vocabulary need it; without one they skip.
+hf_hub =
+
+# A checkout of Anima-Standalone-Trainer. Acceptance A23 feeds the generated dataset.toml to that
+# checkout's own config_util, so it is the one criterion that needs both this and a real dataset.
+trainer =
+
+# A scratch directory below which the destructive benchmarks (tools/bench_batch_ops.py) may write.
+# They refuse to run without one: the incident this guards against is a benchmark pointed at a real
+# dataset. It never has to be inside this repository.
+scratch =

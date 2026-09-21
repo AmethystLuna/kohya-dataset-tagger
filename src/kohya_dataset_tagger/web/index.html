@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kohya Dataset Tagger</title>
+<link rel="stylesheet" href="./css/app.css" />
+<!-- The theme boot: a CLASSIC script, and the only non-module script in this page. It has to run
+     before the first paint, and a deferred module (which is what type="module" means) runs after
+     it - measured at 275 ms cold against a first paint at 116 ms, so a stored dark theme would
+     flash light first. It cannot import js/theme.js: importing is what would make it a module.
+     The reasoning, the numbers and the criterion that keeps the two copies of the key equal are in
+     .github/memory/changelog/light-mode.md. -->
+<script src="./js/theme-boot.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <!-- The row's grammar: identity on the left, then - after the spacer - the controls that belong at
+       the right end. The two PREFERENCES (language, theme) come first there because they are set
+       once; the command BAR is the row's last control, the one a reader reaches by going to the
+       end. No separator here: with the listing's refresh on the grid's own row (where the listing
+       is) the remaining controls are all "the ones at the right end", and a boundary needs two
+       sides. The census readout left this row for the breadcrumb's - it counts the directory the
+       breadcrumb names, and with it in the header the bar had no room left. The reasoning is in
+       .github/memory/changelog/topbar-layout.md. -->
+  <div class="brand-lockup">
+    <h1 class="brand" data-copy="app.title"></h1>
+    <span class="brand-by" data-copy="app.byline"></span>
+  </div>
+  <span id="server-status" class="pill pill-idle" data-copy="app.connecting"></span>
+  <span class="spacer"></span>
+  <label class="field-inline">
+    <!-- A globe, so the control reads as "language" before it reads as a dropdown. Decorative:
+         the select already carries the accessible name and the tooltip (lang.label / lang.hint),
+         and a glyph-shaped name would be worse than none. -->
+    <svg class="field-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <ellipse cx="8" cy="8" rx="3" ry="6.4" fill="none" stroke="currentColor" stroke-width="1.3"/>
+      <path d="M1.6 8h12.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+    </svg>
+    <select id="lang-select" data-copy-aria="lang.label" data-copy-title="lang.hint"></select>
+  </label>
+  <!-- The theme switch, the last PREFERENCE of the row: preferences sit outermost because they are
+       set once and left alone, and the command palette's entry follows them as the row's last
+       control. A checkbox is this repository's pattern (#recursive-toggle, the filter checkboxes)
+       and role="switch" is how ARIA says a checkbox is a switch; the wrapping label is the
+       accessible name, so there is no tooltip and no aria label to keep in step. The label names
+       the THING TOGGLED ("dark mode") and does not change with the state: a control whose words
+       change under the pointer is ambiguous, which is the same call the tab strip made ("colour
+       alone does not say selected"). Checked state and the applied theme are written by one
+       function in js/theme.js, so they cannot disagree. -->
+  <label class="field-inline theme-switch">
+    <input type="checkbox" id="theme-dark" role="switch" />
+    <span data-copy="theme.dark"></span>
+  </label>
+  <!-- The command BAR: the palette's entry point, the row's LAST control, and a bar rather than a
+       button because what it opens is a search field. It carries the palette's own invitation copy
+       (one idea, one string: the input below says the same words) and, at its right end, the
+       gesture as a keycap - the same "a gesture nobody can see is not discoverable" that put a
+       button here in the first place, now shown instead of named. The keycap's text is the pack's
+       palette.openKey, which is a KEY NAME and is deliberately the same in every pack; the
+       accessible name is palette.openTitle, which CONTAINS it (WCAG 2.5.3 label in name, pinned by
+       test_web_palette.py). The wrapper is position:relative and holds the panel, so the panel is a
+       dropdown anchored to the bar - not a modal: it drops DOWN from its entry, Tab leaves it, and
+       a click anywhere else closes it. The wrapper is why the panel can live in the header without
+       the header growing: an absolute child paints over the page but takes no row space. -->
+  <div class="palette-bar-wrap">
+    <button type="button" id="btn-palette" class="palette-bar" aria-haspopup="dialog"
+            aria-expanded="false" data-copy-title="palette.openTitle"
+            data-copy-aria="palette.openTitle">
+      <span class="palette-bar-hint" data-copy="palette.placeholder" aria-hidden="true"></span>
+      <kbd class="palette-key" data-copy="palette.openKey" aria-hidden="true"></kbd>
+    </button>
+    <!-- The command palette (T3), unchanged inside: the input is the combobox, the list is its
+         listbox and its options are never focusable, so aria-activedescendant is what a screen
+         reader reads out, reason and all. Every row comes from app.js's command table, where each
+         entry calls the same function its button calls. Its SHELL is the dropdown: role="dialog"
+         (it owns a name and a focusable field) but NOT aria-modal - the page behind it stays
+         reachable, and the palette's key handler is on the document, so nothing is stolen. -->
+    <div id="palette" class="palette-pop" role="dialog" aria-labelledby="palette-title" hidden>
+      <div class="dialog-head">
+        <h2 class="panel-title" id="palette-title" data-copy="palette.title"></h2>
+        <span class="spacer"></span>
+        <button type="button" id="btn-palette-close" class="btn btn-mini" data-copy="palette.close"></button>
+      </div>
+      <input type="text" id="palette-input" class="palette-input" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-controls="palette-list" aria-autocomplete="list"
+             data-copy-placeholder="palette.placeholder" data-copy-aria="palette.placeholder" />
+      <div id="palette-list" class="palette-list" role="listbox"></div>
+      <!-- The live region: how many commands the query matched, or why nothing did. Enter on an
+           unavailable row answers here too, so a refusal is never silence. -->
+      <p id="palette-status" class="hint" role="status" aria-live="polite"></p>
+      <p class="hint" data-copy="palette.keys"></p>
+    </div>
+  </div>
+
+  <!-- The readiness strip (T1.4): the three things that decide whether this dataset can be trained,
+       each segment being the action that fixes it (select the caption-less images / rebuild the
+       stale caches / open the export panel's checks). It is a second row of the page header, not a
+       panel, because the question is asked from every tab. Its numbers are painted by readiness.js
+       from values app.js already holds - the listing's counts, the cache panel's own status view,
+       the export panel's own report - so it is not a fourth source of truth. Hidden until a
+       directory is open: without one there is no question to answer. -->
+  <div id="readiness" class="readiness" hidden></div>
+</header>
+
+<main class="layout">
+  <aside class="panel panel-left">
+    <div class="panel-head">
+      <h2 class="panel-title" data-copy="browse.rootsTitle"></h2>
+      <button type="button" id="btn-add-root" class="btn btn-mini"
+              data-copy="settings.rootsAdd" data-copy-aria="settings.rootsAddAria"
+              data-copy-title="settings.rootsAddTitle"></button>
+    </div>
+    <form id="root-add-form" class="row root-add-form" hidden>
+      <input type="text" id="root-path-input" spellcheck="false" autocomplete="off"
+             data-copy-placeholder="settings.rootPathPlaceholder" />
+      <button type="submit" id="btn-root-add-ok" class="btn btn-primary" data-copy="settings.rootAddOk"></button>
+      <button type="button" id="btn-root-add-cancel" class="btn" data-copy="settings.rootAddCancel"></button>
+    </form>
+    <ul id="root-list" class="list"></ul>
+    <h2 class="panel-title" data-copy="browse.dirsTitle"></h2>
+    <button type="button" id="btn-parent" class="btn btn-wide" data-copy="browse.parent" disabled></button>
+    <ul id="dir-list" class="list"></ul>
+    <p class="hint" data-copy="browse.leftHint"></p>
+  </aside>
+
+  <div class="resizer" id="resizer-left" role="separator" aria-orientation="vertical"
+       tabindex="0" data-copy-aria="layout.resizeLeft" data-copy-title="layout.resizeHint"></div>
+
+  <section class="panel panel-center" id="center-panel">
+    <!-- The breadcrumb row: the path on the left, the census of the directory it names on the
+         right. The census is a SIBLING of the nav, never a child: #breadcrumb is rebuilt with
+         replaceChildren() on every navigation (app.js:951-954), so a child would be destroyed by
+         the next click - and it is the same reason the gallery's toolbar sits above the grid rather
+         than inside it. It moved out of the page header because it counts what the breadcrumb
+         names, and because the header had to make room for the command bar. -->
+    <div class="breadcrumb-row">
+      <nav id="breadcrumb" class="breadcrumb"></nav>
+      <span id="dir-counts" class="counts"></span>
+    </div>
+    <!-- The grid's own row, one above the grid, and the same grammar as the page header:
+         scope | state ....... actions (refresh, then the selection actions). The browse scope
+         belongs here because it changes what the GRID contains - it is a listing option, not a
+         property of the left column, whose subdirectory counts stay the non-recursive ones
+         (api/fs.py:5-12). It cannot go into #breadcrumb: that element is rebuilt with
+         replaceChildren() on every navigation, so a control inside it is destroyed by the next
+         click, and #gallery is rebuilt the same way.
+         The separator is what keeps the scope and the state readout from reading as one run of
+         text: 6px of gap between a checkbox label and a dim 12px readout is not a boundary. -->
+    <div class="toolbar" id="gallery-toolbar">
+      <label class="field-inline">
+        <input type="checkbox" id="recursive-toggle" />
+        <span data-copy="browse.recursive"></span>
+      </label>
+      <span class="group-sep" aria-hidden="true"></span>
+      <span id="selection-info" class="selection-info" data-copy="gallery.selectionNone"></span>
+      <span class="spacer"></span>
+      <!-- The refresh action, on the row that shows what it refreshes: it re-fetches the listing
+           the gallery is displaying - and the left column's directory list is repainted by the very
+           same call, so there is no second refresh button to go looking for. Icon only, so the
+           words survive as the accessible name and the tooltip (the globe in the header is the same
+           pattern): the glyph is decoration and must never become the name. -->
+      <button type="button" id="btn-refresh" class="btn btn-icon"
+              data-copy-aria="browse.refresh" data-copy-title="browse.refresh">
+        <svg class="field-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M13.3 6.7A5.6 5.6 0 1 0 13.6 8.6" fill="none" stroke="currentColor"
+                stroke-width="1.3" stroke-linecap="round"/>
+          <path d="M13.5 3.1v3.5h-3.5" fill="none" stroke="currentColor" stroke-width="1.3"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button type="button" id="btn-select-all" class="btn" data-copy="gallery.selectAll"></button>
+      <button type="button" id="btn-select-missing" class="btn" data-copy="gallery.selectMissing"></button>
+      <button type="button" id="btn-clear-selection" class="btn" data-copy="gallery.clearSelection"></button>
+    </div>
+    <p class="hint" data-copy="gallery.keyboardHint"></p>
+    <!-- What is narrowing the grid, on the grid's own panel. The Filter tab keeps the
+         controls that CHOOSE conditions (the frequency table, the search box, the two
+         layer checkboxes); this strip is the one live rendering of the conditions in
+         force, so a gallery showing 3 of 691 images can say why - and drop one condition -
+         without leaving it. Relocated, not mirrored: two live copies of one state drift.
+         A sibling of #gallery, never a child: the grid is rebuilt with replaceChildren()
+         on every navigation, and the strip has to survive that. It is painted by
+         filter.js (paintActive / paintCount) and hidden whenever nothing filters. -->
+    <div id="gallery-filter" class="filter-strip" hidden>
+      <span id="filter-count" class="filter-count"></span>
+      <div id="filter-active" class="chips"></div>
+    </div>
+    <div id="gallery" class="gallery" tabindex="0"></div>
+    <p id="gallery-empty" class="empty" role="status" data-copy="gallery.empty" hidden></p>
+    <button type="button" id="btn-gallery-clear-filter" class="btn" data-copy="filter.clearAll" hidden></button>
+    <div id="marquee" class="marquee" hidden></div>
+  </section>
+
+  <div class="resizer" id="resizer-right" role="separator" aria-orientation="vertical"
+       tabindex="0" data-copy-aria="layout.resizeRight" data-copy-title="layout.resizeHint"></div>
+
+  <aside class="panel panel-right">
+    <div class="tabs" role="tablist">
+      <button type="button" class="tab is-active" role="tab" data-tab="filter" data-copy="tab.filter"></button>
+      <button type="button" class="tab" role="tab" data-tab="autotag" data-copy="tab.autotag"></button>
+      <button type="button" class="tab" role="tab" data-tab="cache" data-copy="tab.cache"></button>
+    </div>
+
+    <!-- The one answer to "which images?" for the whole column. It used to be a control per
+         panel: the tagger had the four scopes with live counts, the batch panel had its own copy
+         of the same four, so "selected: 12" in one panel and the button in the other acted on
+         different sets of images. Every panel that acts on images now reads THIS value - app.js
+         builds the single control (scope.js) and hands the instance to each of them (tagger,
+         batch, crop, scale), so there is one live copy. It sits outside .tab-panels on purpose:
+         that is the scrolling region, and a control that scrolls out of reach is not shared.
+         The scale panel was the last one to obey a directory of its own instead (its endpoint
+         took a root, not a list); since 2026-09-20 the endpoint takes the list, so the strip
+         decides there too. -->
+    <div id="scope-strip" class="scope-strip">
+      <label class="field-inline">
+        <span data-copy="scope.label"></span>
+        <select id="scope-select"></select>
+      </label>
+      <p class="hint" data-copy="scope.stripHint"></p>
+    </div>
+
+    <div class="tab-panels">
+
+    <div class="tab-panel" data-panel="filter" hidden>
+      <p class="hint" data-copy="filter.semantics"></p>
+      <p class="hint" data-copy="filter.cycleHint"></p>
+      <!-- The count and the active conditions are NOT here: they live in the center
+           panel's #gallery-filter strip, next to the grid they narrow, and are the only
+           rendering of them (the Filter tab keeps the controls that choose conditions). -->
+      <div class="row">
+        <button type="button" id="btn-filter-clear" class="btn" data-copy="filter.clear"></button>
+        <button type="button" id="btn-filter-clear-all" class="btn" data-copy="filter.clearAll"></button>
+      </div>
+      <h3 class="panel-title" data-copy="filter.frequencyTitle"></h3>
+      <div class="row">
+        <input type="search" id="filter-search" autocomplete="off" spellcheck="false"
+               data-copy-placeholder="filter.searchPlaceholder" />
+        <select id="filter-sort" data-copy-title="filter.sortHint"></select>
+      </div>
+      <label class="field-inline">
+        <input type="checkbox" id="filter-selection" />
+        <span data-copy="filter.onlySelected"></span>
+      </label>
+      <label class="field-inline">
+        <input type="checkbox" id="filter-scope-visible" />
+        <span data-copy="filter.scopeVisible"></span>
+      </label>
+      <div id="frequency-scope" class="hint"></div>
+      <div id="frequency-list" class="freq-list"></div>
+      <p id="frequency-empty" class="hint" data-copy="filter.frequencyEmpty" hidden></p>
+    </div>
+
+    <div class="tab-panel" data-panel="autotag" hidden>
+      <label class="field">
+        <span data-copy="autotag.model"></span>
+        <select id="autotag-model"></select>
+      </label>
+      <p id="autotag-model-note" class="hint"></p>
+      <div class="row">
+        <button type="button" id="btn-model-roots" class="btn" data-copy="settings.modelRootsOpen"></button>
+      </div>
+      <fieldset class="box">
+        <legend data-copy="autotag.thresholds"></legend>
+        <div id="autotag-thresholds" class="threshold-grid"></div>
+      </fieldset>
+      <fieldset class="box">
+        <legend data-copy="autotag.postprocess"></legend>
+        <div id="autotag-options" class="option-list"></div>
+        <label class="field">
+          <span data-copy="autotag.undesiredTags"></span>
+          <input type="text" id="autotag-undesired" spellcheck="false" />
+        </label>
+        <label class="field">
+          <span data-copy="autotag.alwaysFirstTags"></span>
+          <input type="text" id="autotag-always-first" spellcheck="false" />
+        </label>
+      </fieldset>
+      <label class="field">
+        <span data-copy="autotag.writeMode"></span>
+        <select id="autotag-write-mode"></select>
+      </label>
+      <div class="row">
+        <button type="button" id="btn-autotag-preview" class="btn btn-primary" data-copy="autotag.preview"></button>
+        <button type="button" id="btn-autotag-run" class="btn" data-copy="autotag.run" disabled></button>
+        <button type="button" id="btn-autotag-cancel" class="btn btn-danger" data-copy="autotag.cancel" hidden></button>
+      </div>
+      <div id="autotag-progress" class="progress" hidden>
+        <div class="progress-track"><div id="autotag-progress-fill" class="progress-fill"
+             role="progressbar" aria-labelledby="autotag-progress-text"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+        <div id="autotag-progress-text" class="hint" role="status" aria-live="polite"></div>
+        <div id="autotag-errors" class="errors" role="alert"></div>
+      </div>
+      <h3 class="panel-title" id="autotag-diff-title" data-copy="autotag.diffTitle" hidden></h3>
+      <div id="autotag-diff-summary" class="hint"></div>
+      <div id="autotag-diff" class="diff"></div>
+    </div>
+
+    <div class="tab-panel" data-panel="cache" hidden>
+      <p class="hint" data-copy="cache.hint"></p>
+      <div class="row">
+        <button type="button" id="btn-cache-refresh" class="btn" data-copy="cache.refresh"></button>
+        <button type="button" id="btn-cache-cancel" class="btn btn-danger" data-copy="cache.cancel" hidden></button>
+        <span class="spacer"></span>
+        <button type="button" id="btn-cache-rebuild-all" class="btn" data-copy="cache.rebuildAll" disabled></button>
+      </div>
+      <div id="cache-status-line" class="hint"></div>
+      <div id="cache-list" class="cache-list"></div>
+      <p id="cache-empty" class="hint" data-copy="cache.empty" hidden></p>
+    </div>
+    </div>
+
+    <!-- The caption editor of the ACTIVE IMAGE, pinned below the tab panels and
+         deliberately not a tab of its own: a tab is something you visit, and
+         walking the grid fixing captions one after another is exactly the case
+         where having to visit one is what gets in the way. It is one live editor
+         (web/js/tags.js); the zoom overlay re-instantiates the same module while
+         it covers this, and #caption-form is hidden - leaving the status line
+         below as the empty state - while no image is active. -->
+    <section id="caption-dock" class="caption-dock">
+      <div class="preview">
+        <img id="preview-img" class="preview-img" alt="" data-copy-alt="caption.previewAlt" data-copy-title="caption.previewAlt" />
+        <div id="active-meta" class="meta" data-copy="caption.noActiveImage"></div>
+        <span class="spacer"></span>
+        <!-- Measured: at a 720px viewport this dock left the tab panels 242px of
+             655. The panels scroll, so nothing is unreachable, but the user gets
+             to decide how much of the column the editor keeps. Its label is
+             painted from the collapsed state, so it is registered for relabel. -->
+        <button type="button" id="btn-caption-toggle" class="btn btn-mini"
+                aria-controls="caption-form"></button>
+      </div>
+      <div id="caption-form">
+        <div id="caption-warning" class="warning" role="alert" hidden>
+          <strong data-copy="caption.multilineTitle"></strong>
+          <span data-copy="caption.multilineBody"></span>
+        </div>
+        <div id="caption-file" class="hint mono"></div>
+        <div id="tag-chips" class="chips"></div>
+        <div class="tag-input-row">
+          <div class="suggest-wrap">
+            <input type="text" id="tag-input" autocomplete="off" spellcheck="false"
+                   data-copy-placeholder="caption.inputPlaceholder" />
+            <div id="tag-suggest" class="suggest" hidden></div>
+          </div>
+          <button type="button" id="btn-add-tag" class="btn" data-copy="caption.add"></button>
+        </div>
+        <div class="row">
+          <label class="field-inline">
+            <input type="checkbox" id="raw-toggle" />
+            <span data-copy="caption.rawMode"></span>
+          </label>
+          <span class="spacer"></span>
+          <span id="save-state" class="save-state" role="status" aria-live="polite"></span>
+          <button type="button" id="btn-save-tags" class="btn" data-copy="caption.saveNow"></button>
+        </div>
+        <textarea id="raw-text" class="raw-text" spellcheck="false" hidden></textarea>
+        <p class="hint" data-copy="caption.orderHint"></p>
+        <p class="hint" data-copy="caption.autosaveHint"></p>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<div id="model-roots-dialog" class="dialog-backdrop" data-copy-aria="settings.modelRootsTitle" hidden>
+  <div class="dialog">
+    <div class="dialog-head">
+      <h2 class="panel-title" data-copy="settings.modelRootsTitle"></h2>
+      <span class="spacer"></span>
+      <button type="button" id="btn-model-roots-close" class="btn btn-mini" data-copy="settings.modelRootsClose"></button>
+    </div>
+    <p class="hint" data-copy="settings.modelRootsHint"></p>
+    <ul id="model-roots-list" class="list model-roots-list"></ul>
+    <div class="row">
+      <input type="text" id="model-root-path-input" spellcheck="false" autocomplete="off"
+             data-copy-placeholder="settings.modelRootPlaceholder" />
+      <button type="button" id="btn-model-root-add" class="btn btn-primary" data-copy="settings.modelRootAdd"></button>
+    </div>
+  </div>
+</div>
+
+<div id="jobs" class="job-shelf" role="status" aria-live="polite" hidden></div>
+
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+[build-system]
+# >=77 for PEP 639: `license = "MIT"` as an SPDX expression plus `license-files`.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kohya-dataset-tagger"
+version = "0.1.0"
+description = "Local dataset tagger for kohya-style training sets (works for LoRA / finetune / DreamBooth)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "AmethystLuna" }]
+keywords = ["kohya", "lora", "dreambooth", "dataset", "captioning", "wd14", "tagging", "stable-diffusion"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "fastapi>=0.141.1",
+    "uvicorn>=0.53.0",
+    "pillow>=12.3.0",
+    "numpy>=2.2.6",
+    "onnxruntime>=1.23.2",
+    # Runtime dependency, not a test dependency: autotag/download.py imports httpx at
+    # module top level for streaming downloads.
+    # (It was originally misplaced in the test extra; found by workflow C on 2026-09-17.)
+    "httpx>=0.28.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/AmethystLuna/kohya-dataset-tagger"
+Repository = "https://github.com/AmethystLuna/kohya-dataset-tagger"
+Issues = "https://github.com/AmethystLuna/kohya-dataset-tagger/issues"
+Changelog = "https://github.com/AmethystLuna/kohya-dataset-tagger/blob/main/CHANGELOG.md"
+Security = "https://github.com/AmethystLuna/kohya-dataset-tagger/security/policy"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.1.1",
+    # Runs the suite across cores: 1005 criteria in 74.5 s serially, 25.2 s with -n auto, same result.
+    # tools/check_relevant.py --full uses it only when it is installed, so the command is portable.
+    "pytest-xdist>=3.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# `network` marks the criteria that talk to a live third-party endpoint (huggingface.co /
+# hf-mirror.com). The per-push CI run excludes them so a third party cannot redden a pull request;
+# the scheduled workflow runs them instead. A local `pytest test/` still runs everything.
+markers = [
+    "network: reaches a live external endpoint",
+]

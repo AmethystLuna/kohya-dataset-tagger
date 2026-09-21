@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+build/
+dist/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Runtime artifacts (the thumbnail cache should not land here by default; listed to prevent slips)
+*.log
+.thumbs/
+# Dataset roots remembered by the launcher (machine config, not committed)
+roots.txt
+
+# Extra model scan paths are machine config, not committed (what is committed is the model_paths.txt.example template)
+model_paths.txt
+
+# The paths this checkout's tests and tools read real data from. What is committed is the
+# local_paths.ini.example template; the private file is the only place a personal path belongs.
+local_paths.ini
+
+# tagger models: the directory is committed (held up by the placeholder file), the models themselves are not (hundreds of MB to 1 GB+)
+models/*
+!models/PUT-TAGGER-MODELS-HERE-one-model-per-subdirectory.txt

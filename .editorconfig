@@ -1,0 +1,21 @@
+# Editor behaviour that mirrors .gitattributes and the encoding rules the test suite enforces.
+# .gitattributes decides what git checks out; this file decides what your editor writes.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+
+# cmd.exe mis-parses LF-terminated .bat files inside parenthesized blocks, so they are CRLF.
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# Windows PowerShell 5.1 decodes a .ps1 as ANSI(GBK) unless it carries a UTF-8 BOM, and then the
+# script fails to parse. test/test_ps1_encoding.py guards this; so does this line.
+[*.ps1]
+charset = utf-8-bom
+
+# Markdown uses two trailing spaces for a hard line break.
+[*.md]
+trim_trailing_whitespace = false

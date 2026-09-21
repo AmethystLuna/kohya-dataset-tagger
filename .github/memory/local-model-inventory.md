@@ -62,7 +62,7 @@ see [tagger-model-landscape](tagger-model-landscape.md).
    The registry should discover via the glob `models--SmilingWolf--<name>\snapshots\*\model.onnx`,
    or store the **directory** in config instead of a full file path.
 2. **Do not write into dataset directories.** These are external resources referenced read-only.
-3. `onnxruntime` is **not** in `Anima-Standalone-Trainer/venv` (verified missing), so it needs to be installed.
+3. `onnxruntime` is **not** in the trainer checkout's `venv` (verified missing), so it needs to be installed.
    The other two environments already have it: the local ComfyUI installation's bundled Python environment,
    a local webui's bundled Python environment (only for checking version compatibility; do not import from another venv directly).
 

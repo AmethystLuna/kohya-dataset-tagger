@@ -21,7 +21,7 @@ Verification against the trainer's source (not recollection):
    This got promoted from "research finding" to the repository's **invariant #1**.
 2. `image_dir` contains a mix of `latent_cache/` and `cache_text_encoder/`, so the browser must filter them.
 3. The trainer has no WD14 tagger script (neither `finetune/` nor `tools/` exists), so we write our own.
-4. `Anima-Standalone-Trainer/venv` is missing `onnxruntime` / `onnx` / `timm`; Pillow / numpy / torch /
+4. The trainer checkout's `venv` is missing `onnxruntime` / `onnx` / `timm`; Pillow / numpy / torch /
    transformers / cv2 are all there. That venv is **Python 3.10.11**.
 5. This machine already has several WD14 v3 model files, so no network is needed (see [local-model-inventory](../local-model-inventory.md)).
 6. The trainer's `/api/jobs/:name/samples/*` route concatenates paths without validating `..` (`training-ui/server.js:1800`)

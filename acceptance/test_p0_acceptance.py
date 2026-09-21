@@ -632,7 +632,7 @@ def test_A24_autocomplete_matches_substrings_and_ranks_prefixes_first(api_client
 # A23  The generated dataset.toml must be accepted by the trainer's own validator
 # --------------------------------------------------------------------------
 
-#: A checkout of Anima-Standalone-Trainer, from `local_paths.ini` (unset by default; A23 then skips).
+#: A trainer checkout, from `local_paths.ini` (unset by default; A23 then skips).
 TRAINER_ROOT = local_paths.trainer_root()
 TRAINER_PY = (TRAINER_ROOT / "venv" / "Scripts" / "python.exe") if TRAINER_ROOT else None
 

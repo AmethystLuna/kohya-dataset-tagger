@@ -92,7 +92,7 @@ Counter-example -> good example:
 `README.md`, `README.zh-CN.md` and `README.ja.md` are one document in three languages, and they are the
 only documentation a visitor reads before deciding whether to install anything. Two rules follow.
 
-**It is a front page, not a manual.** The reader has a dataset and a question. The page answers in this
+**It is a front page.** The reader has a dataset and a question, and the page answers them in this
 order: what this is, whether it is ready (with the measured numbers), what it does that the trainer does
 not, how to install and run it, and last how to work on it. Detail is **linked, not restated**:
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for the gate and the CI jobs, `AGENTS.md` for the constraints,
@@ -124,6 +124,17 @@ and reduced to the following in this repository (they apply to mixed Chinese/Eng
 - Counter-example -> good example:
   - Bad: Because of the cache invalidation mechanism, after a caption is written the text encoder cache should be deleted synchronously.
   - Good: Writing a caption must synchronously delete the text encoder cache; if you don't, training silently uses the old tags.
+- **Do not answer an alternative the reader never raised.** "It is not a plugin", "the feature still works
+  instead of pretending", "which is why it is not the default" - each one invents a position and then spends
+  the reader's attention on it; the reader wonders what the text swerved for. Say what is true, or name the
+  specific action to avoid ("do not install into the trainer's venv"): a real instruction is not a rhetorical
+  contrast.
+  Counter-example -> good example:
+  - Bad: "It is not a plugin for another tool." -> Good: "It runs as its own app and works on the files the dataset directory already has."
+  - Bad: "When the write fails the UI says the entry will be lost, instead of pretending it was saved." -> Good: "When the write fails the UI says the entry will be lost after a restart."
+  - Bad: "CUDA is 14% faster, which is why it is not the default on Windows." -> Good: "The Windows scripts install DirectML by default; CUDA is 14% faster and costs 195 MB more."
+  - Bad: a heading like "What the trainer will not tell you" -> Good: "Two failures that cost a training run".
+
 
 ---
 

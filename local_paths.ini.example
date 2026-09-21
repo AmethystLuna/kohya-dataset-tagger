@@ -24,8 +24,8 @@ models = models
 # The criteria that assert against the real 10861-row vocabulary need it; without one they skip.
 hf_hub =
 
-# A checkout of Anima-Standalone-Trainer. Acceptance A23 feeds the generated dataset.toml to that
-# checkout's own config_util, so it is the one criterion that needs both this and a real dataset.
+# A trainer checkout that reads kohya-style datasets. Acceptance A23 imports its config_util and feeds it
+# the generated dataset.toml, so it is the one criterion that needs both this and a real dataset.
 trainer =
 
 # A scratch directory below which the destructive benchmarks (tools/bench_batch_ops.py) may write.

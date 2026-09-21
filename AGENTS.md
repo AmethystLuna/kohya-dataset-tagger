@@ -24,8 +24,8 @@ Do the whole chain in the browser:
 
 **directory browsing → gallery preview → per-image tag editing → tag filtering → batch WD14 captioning → generate a trainable dataset.toml**
 
-It is a **companion tool** to **Anima-Standalone-Trainer** (a sibling project, not published here), but **not a plugin for it**: its own repository, its own process,
-its own page, interacting with the trainer only through the **filesystem contract** (the dataset directory, `dataset.toml`, the training cache).
+It is a **standalone tool with its own process and its own page**, working directly on the **files** a kohya-style training set already has -
+the `.txt` caption beside each image, the training caches, and `dataset.toml`.
 
 Stack: a Python backend (FastAPI + uvicorn) + a build-free native ES modules frontend.
 The Python environment is **the repository's own `.venv`** (about 250 MB, **torch is not needed**).

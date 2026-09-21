@@ -16,7 +16,7 @@
 
 **浏览目录 → 画廊预览 → 逐图编辑 tag → 按 tag 过滤 → WD14 批量打标 → 生成可直接训练的 `dataset.toml`**
 
-它是 **Anima-Standalone-Trainer** 的配套工具，而不是插件：自己的仓库、自己的进程、自己的页面，除了文件系统契约（数据集目录、`dataset.toml`、训练缓存）之外与训练器不共享任何东西。
+它是一个独立工具，有自己的进程和页面：直接操作数据集里已有的文件——每张图旁边的 `.txt` caption、训练缓存、`dataset.toml`。
 
 ## 状态
 
@@ -29,13 +29,11 @@ pytest test/test_docs_index.py -q          15 passed
 
 数据来自 CI（`windows-latest`、Python 3.10，2026-09-21）。前提不存在的判据——真实训练集、已下载的模型、真实词表——会自己跳过并说明原因，所以全新克隆是绿的。验收套件是独立编写的那一套，由训练器自己的 `config_util` 打分；它同时需要真实数据集和训练器检出，因此只是本地闸门。CI 跑什么见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
-## 训练器不会告诉你的两件事
+## 两种会浪费一次训练的失败
 
-这两种失败都不报错，每一种都浪费一次训练。
+**① 写完 caption，文本编码器缓存就过期了。** 训练器会继续拿旧 tag 训练，什么都不说，所以每次写入 `.txt` 都会同时删掉配对的 `cache_text_encoder/<name>_anima_te.safetensors`。删不掉就报错。证据与复盘：[.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md)（英文）。
 
-**① 写 caption 不会重建文本编码器缓存。** 训练器会继续拿旧 tag 训练，什么都不说。所以本工具要保证的不是「编辑」，而是缓存：每次写入 `.txt` 都会同时删掉配对的 `cache_text_encoder/<name>_anima_te.safetensors`，删不掉就报错，而不是把它吞掉。证据与复盘：[.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md)（英文）。
-
-**② 训练器枚举图片时不递归。** `glob_images()` 只扫一层，`image_dir` 指向父目录时训练集就是空的。真实训练集有几百个子目录，所以本工具按**一个目录一个 subset** 生成，并由训练器自己的配置校验器验收（[tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)）。
+**② 图片枚举只走一层。** `glob_images()` 只扫一层，`image_dir` 指向父目录时训练集就是空的。真实训练集有几百个子目录，所以本工具按**一个目录一个 subset** 生成，并由训练器自己的配置校验器验收（[tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)）。
 
 顺带它还会报告六类训练器会默默接受的问题：缺 caption、caption 里含 `\,`（会被读成两个 tag）、图片大于 `max_bucket_reso`、图片带 alpha、图片太少、空目录。
 
@@ -57,7 +55,7 @@ pytest test/test_docs_index.py -q          15 passed
 
 两套启动器都接受 `--dry-run`：只打印命令行，什么都不启动。
 
-也可以不用启动器：
+也可以直接启动服务：
 
 ```powershell
 .\scripts\start.ps1 -Roots "D:\datasets\my-lora" -Port 3001
@@ -88,15 +86,15 @@ pytest test/test_docs_index.py -q          15 passed
 | **DirectML**（默认） | **0.192 秒** | **5.3 分钟** |
 | CUDA | 0.168 秒 | 4.6 分钟 |
 
-CUDA 快 14%，代价是多 195 MB 外加一个 torch 依赖，所以它不是 Windows 上的默认值。
+CUDA 快 14%，代价是多 195 MB 外加一个 torch 依赖。
 
-装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。装完确认实际拿到的是哪个，`get_available_providers()` 不算数：
+装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。装完确认 session 实际用的是哪个：
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_provider.py    # 用真实模型建一个 session，报告实际生效的提供程序
 ```
 
-提供程序加载失败时 onnxruntime 会**静默回退到 CPU**：推理照跑，慢 4 倍。
+提供程序加载失败时 onnxruntime 会**静默回退到 CPU**：推理照跑，慢 4 倍。`get_available_providers()` 报的是已注册的提供程序，只有 `InferenceSession.get_providers()` 报的是 session 实际使用的那个。
 
 ## Tagger 模型
 
@@ -119,13 +117,13 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> `scripts\start.ps1` / `scripts\start.sh` 只做「挑端口 + 读 roots.txt + 起服务」，不转发模型目录（§3.7）。一旦变成命令行参数，你在界面里删掉的一行下次启动又会被推回来。
+> 启动器只做三件事：挑端口、读 `roots.txt`、起服务。模型目录由界面和 `model_paths.txt` 提供（§3.7）。
 
-`--models` / `KOHYA_TAGGER_MODELS` 是另一回事：它**替换整个搜索列表**，会丢掉仓库的 `models/` 和所有自动发现的位置。「再加一个目录」要的是上面的追加。
+`--models` / `KOHYA_TAGGER_MODELS` 是另一个开关：它**替换整个搜索列表**，仓库的 `models/` 和所有自动发现的位置都会一起丢掉，所以「再加一个目录」用上面的追加。
 
-默认列表里没有任何只存在于某台机器的路径。你的 webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
+默认列表里只有本仓库内和你自己的用户缓存里的位置。你的 webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
 
-**下载不通也不是死路**：把同一个仓库的 `model.onnx` 和 `*.csv` 放进
+**不想下载模型**：把同一个仓库的 `model.onnx` 和 `*.csv` 放进
 
 ```text
 models/<model-id>/
@@ -135,7 +133,7 @@ models/<model-id>/
 
 ## 切换数据集 / 添加模型目录：不用重启
 
-这两类路径以前只能用命令行参数或配置文件设置，而且只在启动时读一次。现在都能在界面里改，立即生效：
+这两类路径都能在界面里改，立即生效：
 
 | 你想做什么 | 在哪里 | 效果 |
 |---|---|---|
@@ -144,9 +142,9 @@ models/<model-id>/
 | 添加模型搜索目录 | Tagger 面板 →「模型目录…」 | 立刻出现在模型列表里；写回 `model_paths.txt` |
 | 删除模型搜索目录 | 同一个对话框里每项的「移除」 | 自动发现的那些只在本次运行生效，界面会说明 |
 
-浏览器给不了原生目录选择器，所以**请粘贴绝对路径**。（为了这一个控件开一个「列出任意目录」的端点，等于废掉白名单。）目录必须已经存在：配一个不存在的根，只会让每个请求都 403 或 404。
+**请粘贴绝对路径**：浏览器没有原生目录选择器，而且目录必须已经存在——配一个不存在的根，只会让每个请求都 403 或 404。
 
-写文件失败时功能**照样能用**，但界面会直接说「重启后这条会丢」，而不是假装保存成功。
+写文件失败时功能**照样能用**，界面会直接说「重启后这条会丢」。
 
 ## 开发
 

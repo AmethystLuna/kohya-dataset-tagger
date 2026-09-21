@@ -54,6 +54,42 @@ is checked and its cells stay free.
 
 Each of the six criteria has a falsification against the miniature tree in \`_build_mini\`.
 
+## The page does not name anybody else's project (2026-09-21)
+
+The three READMEs opened with "a companion tool to **Anima-Standalone-Trainer**" and `AGENTS.md` called it
+"a sibling project", which reads as the same author's second repository. The first correction replaced that
+with an explicit "a separate project by another author" - still more than this repository needs to say. It
+does not describe itself relative to that project at all, so the name is gone from the three READMEs,
+`AGENTS.md`, `CONTRIBUTING.md`, `local_paths.ini.example`, [project-architecture](../project-architecture.md),
+[changelog/bootstrap](bootstrap.md), [local-model-inventory](../local-model-inventory.md) and the A23 comment
+in `acceptance/test_p0_acceptance.py`.
+
+What a reader still needs is kept, in this repository's own words: it is a standalone tool with its own
+process and its own page, it works directly on the files a kohya-style training set already has (the `.txt`
+caption beside each image, the training caches, `dataset.toml`), and acceptance A23 needs a trainer checkout
+to score the generated `dataset.toml`. The name survives only where a **file** or a prompt style is the
+subject: `strategy_anima.py`'s `_anima.safetensors` cache suffix in the cache code, and the
+escape-parentheses hint in the three locale packs.
+
+## No straw men (2026-09-21)
+
+The same habit produced most of the page's other bad sentences: **set up a target the reader never raised,
+then answer it.** "It is not a plugin", "the feature still works instead of pretending", "a download that
+cannot happen is not a dead end", "(an endpoint that lists any directory would void the allowlist)", "which
+is why it is not the default on Windows", "the default list holds no path that exists on only one machine" -
+and, for a whole section, the heading "What the trainer will not tell you". A reader who never considered
+the alternative only wonders what the text swerved for.
+
+All of them are statements now: "Two failures that cost a training run", "a caption write leaves the text
+encoder cache stale", "image enumeration stops one level down", "paste an absolute path", "to use a model
+without downloading it", "the default list contains only locations inside this repository and your own user
+cache".
+
+The rule is in [documentation-style](../documentation-style.md) ("Do not answer an alternative the reader
+never raised") with the counter-examples. **Real warnings were left alone** - "do not install into the
+trainer's venv", "onnxruntime falls back to CPU silently", "a root that does not exist only makes every
+request 403 or 404": a specific action to avoid is not a rhetorical contrast.
+
 ## Evidence
 
 - \`python -m pytest test/test_docs_index.py -q\` → **15 passed** (9 before: 6 new criteria).

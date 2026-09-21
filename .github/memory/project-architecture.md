@@ -9,7 +9,7 @@ metadata:
 
 ## What it is
 
-This tool is a **companion tool** to `Anima-Standalone-Trainer`, not a plugin. There is exactly one relationship between them:
+This tool is **standalone**, not a plugin, and there is exactly one channel between it and the training side:
 
     trainer  ←── filesystem ──→  this tool
              dataset directory (images + .txt captions)

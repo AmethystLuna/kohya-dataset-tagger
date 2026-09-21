@@ -16,7 +16,7 @@ A standalone tagger for **kohya-style training sets**. LoRA, full finetune and D
 
 **browse the directory → preview the gallery → edit tags per image → filter by tag → batch-caption with WD14 → generate a trainable `dataset.toml`**
 
-It is a companion tool to **Anima-Standalone-Trainer**, not a plugin: its own repository, its own process, its own page, and nothing shared with the trainer but the filesystem contract (the dataset directory, `dataset.toml`, the training cache).
+A standalone tool with its own process and its own page: it works directly on the files the dataset already has - the `.txt` caption beside each image, the training caches, and `dataset.toml`.
 
 ## Status
 
@@ -29,13 +29,11 @@ pytest test/test_docs_index.py -q          15 passed
 
 Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose subject is missing - a real training set, a downloaded model, the real vocabulary - skips itself and says so, which is why a fresh clone is green. The acceptance suite is written independently and scored by the trainer's own `config_util`; it needs a real dataset and a trainer checkout, so it stays a local gate. [CONTRIBUTING.md](CONTRIBUTING.md) lists what CI runs.
 
-## What the trainer will not tell you
+## Two failures that cost a training run
 
-Two failures stay silent, and each one costs a training run.
+**① A caption write leaves the text encoder cache stale.** Your trainer keeps training on the old tags and reports nothing, so every `.txt` write also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`. A cache that cannot be deleted raises an error. Evidence and post-mortem: [.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md).
 
-**① A caption write does not rebuild the text encoder cache.** The trainer keeps training on the old tags and reports nothing, so this tool's job is not the edit but the cache: every `.txt` write also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`, and a cache that cannot be deleted is an error rather than something swallowed. Evidence and post-mortem: [.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md).
-
-**② The trainer's image enumeration is not recursive.** `glob_images()` scans one level, so an `image_dir` pointing at a parent directory trains on an empty set. A real training set is a few hundred subdirectories, so this tool writes **one subset per directory** - and acceptance scores the result with the trainer's own config validator ([tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)).
+**② Image enumeration stops one level down.** `glob_images()` scans one level, so an `image_dir` pointing at a parent directory trains on an empty set. A real training set is a few hundred subdirectories, so this tool writes **one subset per directory** - and acceptance scores the result with the trainer's own config validator ([tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)).
 
 Along the way it reports six classes of problem that the trainer accepts silently: a missing caption, a caption containing `\,` (read as two tags), an image larger than `max_bucket_reso`, an image with alpha, too few images, and an empty directory.
 
@@ -57,7 +55,7 @@ Before the page opens, the launcher
 
 Both launcher sets accept `--dry-run`: print the command lines, start nothing.
 
-You do not have to use the launcher:
+Or start the service directly:
 
 ```powershell
 .\scripts\start.ps1 -Roots "D:\datasets\my-lora" -Port 3001
@@ -88,15 +86,15 @@ onnxruntime decides the speed, so the Windows setup scripts install the **Direct
 | **DirectML** (default) | **0.192 s** | **5.3 minutes** |
 | CUDA | 0.168 s | 4.6 minutes |
 
-CUDA is 14% faster and costs 195 MB more plus a torch dependency, which is why it is not the default on Windows.
+CUDA is 14% faster; it costs 195 MB more plus a torch dependency.
 
-An onnxruntime install must pin `--index-url` (both setup scripts already do): the global pip index can be slow enough to look hung - 0.07 MB/s measured on the reference machine. Then check what you actually got, because `get_available_providers()` is not the answer:
+An onnxruntime install must pin `--index-url` (both setup scripts already do): the global pip index can be slow enough to look hung - 0.07 MB/s measured on the reference machine. Then check which provider the session really uses:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_provider.py    # builds a session with a real model and reports the provider in use
 ```
 
-A provider that fails to load makes onnxruntime **fall back to CPU silently**: inference still runs, four times slower.
+A provider that fails to load makes onnxruntime **fall back to CPU silently**: inference still runs, four times slower. `get_available_providers()` reports the providers that are registered; only `InferenceSession.get_providers()` reports the one a session uses.
 
 ## Tagger models
 
@@ -119,13 +117,13 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> `scripts\start.ps1` / `scripts\start.sh` only pick a port, read `roots.txt` and start the service; they do not forward model directories (§3.7). As command-line arguments they would push a line you deleted in the UI back on the next start.
+> The launchers do three things: pick a port, read `roots.txt`, start the service. Model directories come from the UI and `model_paths.txt` (§3.7).
 
-`--models` / `KOHYA_TAGGER_MODELS` is the other one: it **replaces** the whole search list, dropping the repository's `models/` and every auto-discovered location. "Add one more directory" wants the append above.
+`--models` / `KOHYA_TAGGER_MODELS` is the other flag: it **replaces** the whole search list, the repository's `models/` and every auto-discovered location included, so adding one directory wants the append above.
 
-The default list holds no path that exists on only one machine. Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
+The default list contains only locations inside this repository and your own user cache. Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
 
-**A download that cannot happen is not a dead end**: put `model.onnx` and the `*.csv` from the same repository into
+**To use a model without downloading it**, put `model.onnx` and the `*.csv` from the same repository into
 
 ```text
 models/<model-id>/
@@ -135,7 +133,7 @@ a directory that already holds a placeholder file whose file name says exactly t
 
 ## Datasets and model directories without a restart
 
-Both kinds of path used to be settable only from the command line or a config file, and were read once at startup. Both are now editable in the UI, with immediate effect:
+Both kinds of path are editable in the UI, with immediate effect:
 
 | What you want | Where | Effect |
 |---|---|---|
@@ -144,9 +142,9 @@ Both kinds of path used to be settable only from the command line or a config fi
 | Add a model search directory | tagger panel → "Model directories…" | in the model list immediately; written back to `model_paths.txt` |
 | Remove a model search directory | "Remove" on each entry in the same dialog | auto-discovered entries last for this run only, and the UI says so |
 
-A browser cannot hand you a native directory picker, so **paste an absolute path**. (An endpoint that lists any directory at all, for this one control, would void the allowlist.) The directory must already exist: a root that does not only makes every request 403 or 404.
+**Paste an absolute path**: a browser has no native directory picker, and the directory must already exist - a root that does not only makes every request 403 or 404.
 
-When the file cannot be written the feature **still works**, but the UI says "this entry will be lost after a restart" instead of pretending it was saved.
+When the file cannot be written the feature **still works**, and the UI says "this entry will be lost after a restart".
 
 ## Development
 

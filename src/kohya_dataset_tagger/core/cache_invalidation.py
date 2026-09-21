@@ -44,7 +44,7 @@ IMAGE_EXTS: frozenset[str] = frozenset(
 #: Trainer cache directories to filter (the "entries that must be filtered" from dataset-contract).
 _CACHE_DIRNAMES = frozenset({TE_CACHE_DIRNAME, LATENT_CACHE_DIRNAME})
 
-#: Extensions of the latent cache: kohya's general `.npz`, and Anima's `_anima.safetensors`.
+#: Extensions of the latent cache: kohya's general `.npz`, and the `_anima.safetensors` variant.
 _LATENT_SUFFIXES = frozenset({".npz", ".safetensors"})
 
 
@@ -100,7 +100,7 @@ def latent_cache_paths(image: Path) -> list[Path]:
     """Return the latent cache files that **already exist** for the image (all resolutions / suffixes).
 
     The latent filename carries the resolution and cache_suffix (`library/strategy_base.py:437-440`):
-    `<stem>_<W:04d>x<H:04d><cache_suffix>`; Anima's cache_suffix is
+    `<stem>_<W:04d>x<H:04d><cache_suffix>`; the `_anima` strategy's suffix is
     `_anima.safetensors` (`strategy_anima.py:424`) and kohya's general one is `.npz`.
     The resolution cannot be derived from the image path, so it is discovered with a `<stem>_*` wildcard - which is why, unlike
     `text_encoder_cache_paths`, this returns only files that really exist.

@@ -88,7 +88,7 @@ vocabulary skip themselves and say so.
 | `dataset` | a kohya-style dataset directory; everything that reads real data uses it, and nothing ever writes to it |
 | `models` | model search roots, separated by the platform's path separator (`;` on Windows, `:` elsewhere) |
 | `hf_hub` | a HuggingFace cache, for the criteria that assert the real 10861-row vocabulary |
-| `trainer` | a checkout of Anima-Standalone-Trainer, which acceptance A23 feeds the generated `dataset.toml` to |
+| `trainer` | a trainer checkout; acceptance A23 imports its `config_util` and feeds it the generated `dataset.toml`, and nothing else needs it |
 | `scratch` | a scratch directory the destructive benchmarks may write below |
 
 `python local_paths.py` prints what is currently in effect.

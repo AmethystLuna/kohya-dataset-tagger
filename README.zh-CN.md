@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="标注器主界面：左栏是根目录与子目录，中间是画廊，右栏是 tag 频次" width="100%">
+  <img src="assets/screenshot.zh-CN.png" alt="标注器主界面：左栏是根目录与子目录，中间是画廊，右栏是 tag 频次" width="100%">
 </p>
 
 一个面向 **kohya 风格训练集**的独立标注器。LoRA、全量微调、DreamBooth 用的是同一套 `image_dir` + `.txt` sidecar 结构，整条链路都在浏览器里完成：

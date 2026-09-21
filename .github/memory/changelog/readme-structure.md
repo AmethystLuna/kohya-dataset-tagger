@@ -169,11 +169,15 @@ It is the real service, running on a **synthetic demo dataset**, screenshotted w
   `chrome --headless --window-size=1440,900 --virtual-time-budget=20000 --screenshot=...` on `?lang=en`;
   the demo tree was deleted afterwards.
 
-The image is `assets/screenshot.png` (186 KB, 1440x900, light theme, English interface) and all three pages
-use the same file. A `prefers-color-scheme` pair - one shot per GitHub colour scheme - would be the nicer
-answer and is not done here: a one-shot headless Chrome run cannot force the dark theme, because the theme
-comes from `localStorage` and only a same-origin wrapper page can seed that, which is the probe's mechanism
-and not the real service's.
+There is **one shot per language**: `assets/screenshot.en.png`, `assets/screenshot.zh-CN.png` and
+`assets/screenshot.ja.png` (187 / 183 / 197 KB, 1440x900, light theme), each page showing its own interface -
+the first version put a single English shot in all three, and the reviewer asked why a trilingual front page
+shared one picture. The same demo tree and the same command produce all three; only `?lang=` differs, so
+re-shooting after a UI change is three runs of one recipe. The alt text is translated per page as well.
+
+A `prefers-color-scheme` pair (one shot per GitHub colour scheme) is not done: a one-shot headless Chrome
+run cannot force the dark theme, because the theme comes from `localStorage` and only a same-origin wrapper
+page can seed that, which is the probe's mechanism and not the real service's.
 
 ## Evidence
 

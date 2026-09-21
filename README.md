@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="The tagger's main screen: root and subdirectories on the left, the image gallery in the middle, tag frequency on the right" width="100%">
+  <img src="assets/screenshot.en.png" alt="The tagger's main screen: root and subdirectories on the left, the image gallery in the middle, tag frequency on the right" width="100%">
 </p>
 
 A standalone tagger for **kohya-style training sets**. LoRA, full finetune and DreamBooth all use the same `image_dir` + `.txt` sidecar layout, and the whole chain runs in the browser:

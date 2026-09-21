@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="タガーのメイン画面：左がルートディレクトリとサブディレクトリ、中央がギャラリー、右がタグ頻度" width="100%">
+  <img src="assets/screenshot.ja.png" alt="タガーのメイン画面：左がルートディレクトリとサブディレクトリ、中央がギャラリー、右がタグ頻度" width="100%">
 </p>
 
 **kohya 形式の学習セット**のためのスタンドアロンなタガー。LoRA ／ フルファインチューニング ／ DreamBooth はどれも同じ `image_dir` + `.txt` サイドカー形式を使い、一連の作業はすべてブラウザーで完結する：

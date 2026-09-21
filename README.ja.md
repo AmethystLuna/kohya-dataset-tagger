@@ -16,9 +16,7 @@
 
 **ディレクトリ閲覧 → ギャラリープレビュー → 画像ごとのタグ編集 → タグのフィルタリング → WD14 による一括キャプション付け → 学習に使える `dataset.toml` の生成**
 
-独立したツールで、独自のプロセスと独自のページを持つ：データセットにすでにあるファイル——各画像の隣の `.txt` キャプション、学習キャッシュ、`dataset.toml`——を直接扱う。
-
-## ステータス
+独立したアプリとして動き、独自のプロセスとページを持ち、データセットにすでにあるファイル——各画像の隣の `.txt` キャプション、学習キャッシュ、`dataset.toml`——を直接扱う。
 
 **V0.1 · P0 完了**。バックエンド、フロントエンド、タガー、モデルのダウンロード、`dataset.toml` の生成はすべて実装済みで、P0 の受け入れラウンドに合格した。
 
@@ -27,15 +25,7 @@ pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # クロー
 pytest test/test_docs_index.py -q          15 passed
 ```
 
-数値は CI（`windows-latest`、Python 3.10、2026-09-21）で測定した。対象が存在し得ない基準——実際の学習セット、ダウンロード済みのモデル、本物の語彙——は自分自身をスキップしてそう告げるので、クローン直後でもグリーンになる。受け入れテストは独立に書かれたもので、トレーナー自身の `config_util` が採点する。実際のデータセットとトレーナーのチェックアウトの両方が必要なので、ローカルのゲートのままにしてある。CI が何を実行するかは [CONTRIBUTING.md](CONTRIBUTING.md)（英語）にある。
-
-## 1 回分の学習を無駄にする 2 つの失敗
-
-**① キャプションを書くとテキストエンコーダーのキャッシュが古くなる。** トレーナーは古いタグのまま学習を続け、何も報告しない。そのため `.txt` を書き込むたびに対応する `cache_text_encoder/<name>_anima_te.safetensors` も削除する。削除できないときはエラーになる。根拠と事後分析：[.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md)（英語）。
-
-**② 画像列挙は 1 階層で止まる。** `glob_images()` は 1 階層しか走査しないので、`image_dir` が親ディレクトリを指すと学習セットは空になる。実際の学習セットは数百個のサブディレクトリになるため、このツールは**ディレクトリごとに 1 subset** を生成し、トレーナー自身の設定バリデーター（[tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)）で受け入れテストを受ける。
-
-その過程で、トレーナーが黙って受け入れてしまう 6 種類の問題も報告する：キャプションの欠落、`\,` を含むキャプション（2 つのタグとして読まれる）、`max_bucket_reso` より大きい画像、alpha 付きの画像、画像数が少なすぎる、空のディレクトリ。
+数値は CI（`windows-latest`、Python 3.10、2026-09-21）で測定した。対象が存在し得ない基準——実際の学習セット、ダウンロード済みのモデル、本物の語彙——は自分自身をスキップしてそう告げるので、クローン直後でもグリーンになる。CI が何を実行するか、受け入れ基準がどこにあるかは [CONTRIBUTING.md](CONTRIBUTING.md)（英語）にある。
 
 ## インストールと実行
 
@@ -117,11 +107,9 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> ランチャーがするのは 3 つだけ：ポートを選び、`roots.txt` を読み、サービスを起動する。モデルディレクトリは UI と `model_paths.txt` から来る（§3.7）。
-
 `--models` / `KOHYA_TAGGER_MODELS` は別のフラグだ：**検索リスト全体を置き換える**ので、リポジトリの `models/` も自動検出された場所も一緒に落ちる。ディレクトリを 1 つ足すなら上の追加を使う。
 
-既定のリストに入っているのは、このリポジトリの中と自分のユーザーキャッシュの中だけだ。webui / ComfyUI のモデルがどこにあっても、そのディレクトリを `model_paths.txt` に書けばよい。
+webui / ComfyUI のモデルがどこにあっても、そのディレクトリを `model_paths.txt` に書けばよい。
 
 **ダウンロードせずに使う**：同じリポジトリの `model.onnx` と `*.csv` を
 
@@ -146,41 +134,19 @@ models/<model-id>/
 
 ファイルに書き込めなくても機能は**そのまま動く**。UI は「再起動後にこの項目は失われます」と表示する。
 
-## 開発
+## よくある質問
 
-まず [AGENTS.md](AGENTS.md)（英語）を読む——`.github/memory/` へ導く常駐インデックスだ。作業手順は [.agents/skills/kohya-dataset-tagger-workflow/SKILL.md](.agents/skills/kohya-dataset-tagger-workflow/SKILL.md)（英語）にある。
+**キャプションを保存したらキャッシュファイルが消えた。** `.txt` を書き込むと対応する `cache_text_encoder/<name>_anima_te.safetensors` も削除する。削除しないと学習が古いタグを使い続ける（[理由](.github/memory/encoder-cache-invalidation.md)、英語）。
 
-```powershell
-.\.venv\Scripts\python.exe tools\check_relevant.py          # 内側のループ：変更をカバーするテストだけ
-.\.venv\Scripts\python.exe tools\check_relevant.py --full   # 報告前のゲート：全スイート + ドキュメントゲート
-.\.venv\Scripts\python.exe -m pytest test/ -q -n auto       # 単体テストの全スイート
-.\.venv\Scripts\python.exe -m pytest acceptance/ -q         # 受け入れ基準（実際のデータセットが必要）
-```
+**画像に手を加える？** 確定したクロップだけが元画像の隣に `<stem>_1` を 1 枚書き出し、元画像はそのまま。それ以外が書くのは `.txt` キャプションと `dataset.toml` だけ。
 
-### テストのデータの出どころ
+**エクスポートで警告がたくさん出た。** 学習の前に片付けておきたい 6 項目だ：キャプションの欠落、`\,` を含むキャプション（2 つのタグとして読まれる）、`max_bucket_reso` より大きい画像、alpha 付きの画像、画像数が少なすぎる、空のディレクトリ。
 
-`local_paths.ini` は、チェックアウトが自分の学習セット・モデル・トレーナーを見つける場所だ。コミット済みのテンプレート `local_paths.ini.example` は `test/fixtures/sample_dataset/` 配下のサンプルデータセットを指すので、スイートはそのまま実行できる。キーの一覧は [CONTRIBUTING.md](CONTRIBUTING.md)（英語）にある。
-
-### 受け入れテスト
-
-`pytest acceptance/` には、仕様に対して独立に書かれた基準が入っている。A23 は実際の利用側が採点する：生成された `dataset.toml` をトレーナー自身の `config_util` に渡し、ディレクトリごとに 1 subset を構築できることを要求する。実際のデータセットとトレーナーのチェックアウトが必要なので、ローカルのゲートだ。
-
-### ドキュメント構成
-
-| パス | 何か |
-|---|---|
-| `AGENTS.md` | 常駐インデックス（≤ 28 KB、ゲートで強制） |
-| `.github/memory/MEMORY.md` | カテゴリ表 |
-| `.github/memory/INDEX-<category>.md` | カテゴリごとのトピック一覧 |
-| `.github/memory/<topic>.md` | 本体 |
-| `.github/memory/p0-spec.md` | P0 の凍結された契約と受け入れ基準 |
-| `.agents/skills/<name>/SKILL.md` | 作業手順 |
-
-`test/test_docs_index.py` がこの構成の腐敗を防ぐ：予算、到達可能なリンク、孤立トピックの不在、スキルの準拠、そして 3 つの README の同期。
+**ランチャーにモデルディレクトリを渡せる？** 渡せない。`setup_env.*` と `start.*` が取るのはポートとルートディレクトリだけ。モデルディレクトリは UI と `model_paths.txt` が持ち、削除したディレクトリは戻らない（§3.7）。
 
 ## コントリビュート
 
-Issue とプルリクエストは英語でも中国語でも歓迎する。[CONTRIBUTING.md](CONTRIBUTING.md)（英語）には、セットアップ、2 段階のゲート、変更が守るべきルール、CI が実行する内容がある。セキュリティの問題は [SECURITY.md](SECURITY.md)（英語）へ。このプロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md)（英語）に従う。
+Issue とプルリクエストは英語でも中国語でも歓迎する。ツール自体を触る場合は [AGENTS.md](AGENTS.md)（英語）から。[CONTRIBUTING.md](CONTRIBUTING.md)（英語）には、セットアップ、2 段階のゲート、変更が守るべきルール、CI が実行する内容がある。セキュリティの問題は [SECURITY.md](SECURITY.md)（英語）へ。このプロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md)（英語）に従う。
 
 ## ライセンス
 

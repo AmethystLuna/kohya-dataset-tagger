@@ -16,9 +16,7 @@
 
 **浏览目录 → 画廊预览 → 逐图编辑 tag → 按 tag 过滤 → WD14 批量打标 → 生成可直接训练的 `dataset.toml`**
 
-它是一个独立工具，有自己的进程和页面：直接操作数据集里已有的文件——每张图旁边的 `.txt` caption、训练缓存、`dataset.toml`。
-
-## 状态
+它以独立应用的形式运行，有自己的进程和页面，直接操作数据集里已有的文件：每张图旁边的 `.txt` caption、训练缓存、`dataset.toml`。
 
 **V0.1 · P0 完成**。后端、前端、tagger、模型下载、`dataset.toml` 生成全部落地，并通过了 P0 验收。
 
@@ -27,15 +25,7 @@ pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # 全新克
 pytest test/test_docs_index.py -q          15 passed
 ```
 
-数据来自 CI（`windows-latest`、Python 3.10，2026-09-21）。前提不存在的判据——真实训练集、已下载的模型、真实词表——会自己跳过并说明原因，所以全新克隆是绿的。验收套件是独立编写的那一套，由训练器自己的 `config_util` 打分；它同时需要真实数据集和训练器检出，因此只是本地闸门。CI 跑什么见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
-
-## 两种会浪费一次训练的失败
-
-**① 写完 caption，文本编码器缓存就过期了。** 训练器会继续拿旧 tag 训练，什么都不说，所以每次写入 `.txt` 都会同时删掉配对的 `cache_text_encoder/<name>_anima_te.safetensors`。删不掉就报错。证据与复盘：[.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md)（英文）。
-
-**② 图片枚举只走一层。** `glob_images()` 只扫一层，`image_dir` 指向父目录时训练集就是空的。真实训练集有几百个子目录，所以本工具按**一个目录一个 subset** 生成，并由训练器自己的配置校验器验收（[tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)）。
-
-顺带它还会报告六类训练器会默默接受的问题：缺 caption、caption 里含 `\,`（会被读成两个 tag）、图片大于 `max_bucket_reso`、图片带 alpha、图片太少、空目录。
+数据来自 CI（`windows-latest`、Python 3.10，2026-09-21）。前提不存在的判据——真实训练集、已下载的模型、真实词表——会自己跳过并说明原因，所以全新克隆是绿的。CI 跑什么、验收判据在哪，见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
 ## 安装与运行
 
@@ -88,7 +78,7 @@ pytest test/test_docs_index.py -q          15 passed
 
 CUDA 快 14%，代价是多 195 MB 外加一个 torch 依赖。
 
-装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。装完确认 session 实际用的是哪个：
+装 onnxruntime 必须钉住 `--index-url`（两个安装脚本都已经这么做了）：全局 pip 源可能慢到看起来像卡死——参考机器上实测 0.07 MB/s。装完确认 session 实际用的是哪个提供程序：
 
 ```powershell
 .\.venv\Scripts\python.exe tools\check_provider.py    # 用真实模型建一个 session，报告实际生效的提供程序
@@ -117,11 +107,9 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> 启动器只做三件事：挑端口、读 `roots.txt`、起服务。模型目录由界面和 `model_paths.txt` 提供（§3.7）。
-
 `--models` / `KOHYA_TAGGER_MODELS` 是另一个开关：它**替换整个搜索列表**，仓库的 `models/` 和所有自动发现的位置都会一起丢掉，所以「再加一个目录」用上面的追加。
 
-默认列表里只有本仓库内和你自己的用户缓存里的位置。你的 webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
+你的 webui / ComfyUI 模型放在哪，就把那个目录写进 `model_paths.txt`。
 
 **不想下载模型**：把同一个仓库的 `model.onnx` 和 `*.csv` 放进
 
@@ -146,41 +134,19 @@ models/<model-id>/
 
 写文件失败时功能**照样能用**，界面会直接说「重启后这条会丢」。
 
-## 开发
+## 常见问题
 
-先读 [AGENTS.md](AGENTS.md)（英文）——它是指向 `.github/memory/` 的常驻索引。工作流程在 [.agents/skills/kohya-dataset-tagger-workflow/SKILL.md](.agents/skills/kohya-dataset-tagger-workflow/SKILL.md)（英文）。
+**保存 caption 后缓存文件不见了。** 写入 `.txt` 会同时删掉配对的 `cache_text_encoder/<name>_anima_te.safetensors`；不删的话训练会一直用旧 tag（[原因](.github/memory/encoder-cache-invalidation.md)，英文）。
 
-```powershell
-.\.venv\Scripts\python.exe tools\check_relevant.py          # 内环：只跑覆盖本次改动的测试
-.\.venv\Scripts\python.exe tools\check_relevant.py --full   # 汇报前的闸门：全量套件 + 文档闸门
-.\.venv\Scripts\python.exe -m pytest test/ -q -n auto       # 全量单元套件
-.\.venv\Scripts\python.exe -m pytest acceptance/ -q         # 验收判据（需要真实数据集）
-```
+**它会动我的图片吗？** 只有确认过的裁剪会在原图旁边写出一张 `<stem>_1`，原图不动。其余只写 `.txt` caption 和 `dataset.toml`。
 
-### 测试从哪里取数据
+**导出为什么报了一堆警告？** 那是训练前值得处理的六件事：缺 caption、caption 里含 `\,`（会被读成两个 tag）、图片大于 `max_bucket_reso`、图片带 alpha、图片太少、空目录。
 
-`local_paths.ini` 是一个检出找到自己的训练集、模型和训练器的地方；随仓库提交的模板 `local_paths.ini.example` 指向 `test/fixtures/sample_dataset/` 下的样例数据集，所以套件开箱即跑。每个键的含义见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
-
-### 验收
-
-`pytest acceptance/` 里是照着规格独立写、独立于实现的判据。A23 由真实消费方打分：把生成的 `dataset.toml` 交给训练器自己的 `config_util`，要求它按目录建出 subset。这需要真实数据集和训练器检出，所以是本地闸门。
-
-### 文档结构
-
-| 路径 | 是什么 |
-|---|---|
-| `AGENTS.md` | 常驻索引（≤ 28 KB，由闸门强制） |
-| `.github/memory/MEMORY.md` | 分类表 |
-| `.github/memory/INDEX-<category>.md` | 每个分类一份主题清单 |
-| `.github/memory/<topic>.md` | 正文 |
-| `.github/memory/p0-spec.md` | P0 冻结契约与验收判据 |
-| `.agents/skills/<name>/SKILL.md` | 工作流程 |
-
-`test/test_docs_index.py` 防止这套结构烂掉：预算、链接可达、没有孤儿主题、skill 元数据合规，以及三份 README 保持同步。
+**能给启动器传模型目录吗？** 不能：`setup_env.*` 和 `start.*` 只接受端口和根目录。模型目录由界面和 `model_paths.txt` 管理，所以删掉的目录不会自己回来（§3.7）。
 
 ## 参与贡献
 
-欢迎提 issue 和 PR，中英文都可以。[CONTRIBUTING.md](CONTRIBUTING.md)（英文）里有环境搭建、两级闸门、改动必须遵守的规则，以及 CI 跑什么。安全问题请走 [SECURITY.md](SECURITY.md)（英文）；项目遵循 [Contributor Covenant](CODE_OF_CONDUCT.md)（英文）。
+欢迎提 issue 和 PR，中英文都可以；要改这个工具本身，从 [AGENTS.md](AGENTS.md)（英文）开始。[CONTRIBUTING.md](CONTRIBUTING.md)（英文）里有环境搭建、两级闸门、改动必须遵守的规则，以及 CI 跑什么。安全问题请走 [SECURITY.md](SECURITY.md)（英文）；项目遵循 [Contributor Covenant](CODE_OF_CONDUCT.md)（英文）。
 
 ## 许可证
 

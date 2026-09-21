@@ -16,9 +16,7 @@ A standalone tagger for **kohya-style training sets**. LoRA, full finetune and D
 
 **browse the directory → preview the gallery → edit tags per image → filter by tag → batch-caption with WD14 → generate a trainable `dataset.toml`**
 
-A standalone tool with its own process and its own page: it works directly on the files the dataset already has - the `.txt` caption beside each image, the training caches, and `dataset.toml`.
-
-## Status
+It runs as its own app, with its own process and page, and works directly on the files the dataset already has: the `.txt` caption beside each image, the training caches, and `dataset.toml`.
 
 **V0.1 · P0 complete.** Backend, frontend, tagger, model download and `dataset.toml` generation have all landed and passed the P0 acceptance round.
 
@@ -27,15 +25,7 @@ pytest test/ -q -n auto -m "not network"   1079 passed, 31 skipped   # a fresh c
 pytest test/test_docs_index.py -q          15 passed
 ```
 
-Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose subject is missing - a real training set, a downloaded model, the real vocabulary - skips itself and says so, which is why a fresh clone is green. The acceptance suite is written independently and scored by the trainer's own `config_util`; it needs a real dataset and a trainer checkout, so it stays a local gate. [CONTRIBUTING.md](CONTRIBUTING.md) lists what CI runs.
-
-## Two failures that cost a training run
-
-**① A caption write leaves the text encoder cache stale.** Your trainer keeps training on the old tags and reports nothing, so every `.txt` write also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`. A cache that cannot be deleted raises an error. Evidence and post-mortem: [.github/memory/encoder-cache-invalidation.md](.github/memory/encoder-cache-invalidation.md).
-
-**② Image enumeration stops one level down.** `glob_images()` scans one level, so an `image_dir` pointing at a parent directory trains on an empty set. A real training set is a few hundred subdirectories, so this tool writes **one subset per directory** - and acceptance scores the result with the trainer's own config validator ([tools/verify_toml_with_trainer.py](tools/verify_toml_with_trainer.py)).
-
-Along the way it reports six classes of problem that the trainer accepts silently: a missing caption, a caption containing `\,` (read as two tags), an image larger than `max_bucket_reso`, an image with alpha, too few images, and an empty directory.
+Measured on CI (`windows-latest`, Python 3.10, 2026-09-21). A criterion whose subject is missing - a real training set, a downloaded model, the real vocabulary - skips itself and says so, which is why a fresh clone is green. [CONTRIBUTING.md](CONTRIBUTING.md) lists what CI runs and where the acceptance criteria live.
 
 ## Install and run
 
@@ -117,11 +107,9 @@ set KOHYA_TAGGER_EXTRA_MODELS=D:\my-taggers;E:\more
 .\.venv\Scripts\python.exe -m kohya_dataset_tagger --roots "<dataset>" --extra-models "D:\my-taggers"
 ```
 
-> The launchers do three things: pick a port, read `roots.txt`, start the service. Model directories come from the UI and `model_paths.txt` (§3.7).
-
 `--models` / `KOHYA_TAGGER_MODELS` is the other flag: it **replaces** the whole search list, the repository's `models/` and every auto-discovered location included, so adding one directory wants the append above.
 
-The default list contains only locations inside this repository and your own user cache. Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
+Wherever your webui / ComfyUI models are, write that directory into `model_paths.txt`.
 
 **To use a model without downloading it**, put `model.onnx` and the `*.csv` from the same repository into
 
@@ -146,41 +134,19 @@ Both kinds of path are editable in the UI, with immediate effect:
 
 When the file cannot be written the feature **still works**, and the UI says "this entry will be lost after a restart".
 
-## Development
+## FAQ
 
-Read [AGENTS.md](AGENTS.md) first - the resident index into `.github/memory/`. The working procedure is [.agents/skills/kohya-dataset-tagger-workflow/SKILL.md](.agents/skills/kohya-dataset-tagger-workflow/SKILL.md).
+**A cache file disappeared when I saved a caption.** Editing a `.txt` also deletes the matching `cache_text_encoder/<name>_anima_te.safetensors`; without that, training keeps using the old tags ([why](.github/memory/encoder-cache-invalidation.md)).
 
-```powershell
-.\.venv\Scripts\python.exe tools\check_relevant.py          # inner loop: only the tests that cover the change
-.\.venv\Scripts\python.exe tools\check_relevant.py --full   # the gate before reporting: full suite + documentation gate
-.\.venv\Scripts\python.exe -m pytest test/ -q -n auto       # the full unit suite
-.\.venv\Scripts\python.exe -m pytest acceptance/ -q         # acceptance criteria (needs a real dataset)
-```
+**Does it touch my images?** A confirmed crop writes one image beside its source as `<stem>_1` and leaves the original alone. Everything else writes `.txt` captions and `dataset.toml`.
 
-### Where the tests get their data
+**Why did the export report warnings?** They are the six things worth fixing before a training run: a missing caption, a caption containing `\,` (read as two tags), an image larger than `max_bucket_reso`, an image with alpha, too few images, and an empty directory.
 
-`local_paths.ini` is how a checkout finds its own training set, models and trainer; the committed template `local_paths.ini.example` points at the sample dataset under `test/fixtures/sample_dataset/`, so the suite runs as it is. [CONTRIBUTING.md](CONTRIBUTING.md) lists the keys.
-
-### Acceptance
-
-`pytest acceptance/` holds the criteria written independently against the spec. A23 is scored by the real consumer: the generated `dataset.toml` goes to the trainer's own `config_util`, which must build one subset per directory. That needs a real dataset and a trainer checkout, so it is a local gate.
-
-### Documentation layout
-
-| Path | What it is |
-|---|---|
-| `AGENTS.md` | the resident index (≤ 28 KB, gate-enforced) |
-| `.github/memory/MEMORY.md` | the category table |
-| `.github/memory/INDEX-<category>.md` | one topic list per category |
-| `.github/memory/<topic>.md` | the bodies |
-| `.github/memory/p0-spec.md` | the frozen P0 contract and acceptance criteria |
-| `.agents/skills/<name>/SKILL.md` | the working procedure |
-
-`test/test_docs_index.py` keeps this structure from rotting: budget, resolvable links, no orphan topics, skill compliance, and the three READMEs in step.
+**Can I pass model directories to the launcher?** No: `setup_env.*` and `start.*` take the port and the root directory only. Model directories live in the UI and `model_paths.txt`, so a directory you removed stays removed (§3.7).
 
 ## Contributing
 
-Issues and pull requests are welcome, in English or Chinese. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the two-tier gate, the rules a change has to respect and what CI runs. Security problems go through [SECURITY.md](SECURITY.md); the project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+Issues and pull requests are welcome, in English or Chinese; work on the tool itself starts at [AGENTS.md](AGENTS.md). [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the two-tier gate, the rules a change has to respect and what CI runs. Security problems go through [SECURITY.md](SECURITY.md); the project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
 
 ## License
 

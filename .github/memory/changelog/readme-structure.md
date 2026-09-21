@@ -90,6 +90,37 @@ never raised") with the counter-examples. **Real warnings were left alone** - "d
 trainer's venv", "onnxruntime falls back to CPU silently", "a root that does not exist only makes every
 request 403 or 404": a specific action to avoid is not a rhetorical contrast.
 
+## The front page is not a design document (2026-09-21)
+
+The README had grown a second audience: the status block, the two silent failures, the gate commands, the
+`local_paths` keys, the acceptance criteria, the documentation layout. The rule for the front page is
+narrower: **an introduction, a deployment and a usage guide**, nothing else. The two explaining sections are
+gone, the contributor half moved to `CONTRIBUTING.md` and `AGENTS.md` (the Contributing section points at
+them now), and the status block became the lead paragraph. 188 -> 154 lines. What a reader still needs from
+the deleted essay survives as a four-entry **FAQ** at the end: a cache file disappearing, what the tool
+writes, the six export warnings, and which arguments the launchers take.
+
+## Polished with a local model, and what survived the review (2026-09-21)
+
+Both pages were put through `ollama` (`qwen3.5:9b`, 6.6 GB, on a 16 GB card) as a second opinion. Pass 1
+("change nothing, keep every fact") changed three words of Chinese and nothing else. Pass 2 asked for
+rewrites and proposed 28 Chinese paragraphs, plus 2 English and 2 Japanese ones that were whitespace inside
+the HTML navigation and badges.
+
+**All 28 Chinese proposals were rejected.** The reasons are worth keeping:
+
+- The register turns into a spec sheet - "唯一依赖为", "故", "仅", "无需" - the opposite of what
+  [ui-copy](../ui-copy.md) asks for (plain and imperative, as if explaining to a colleague).
+- Two lose information: "提供程序加载失败时" -> "程序加载失败时" (a provider is not a program), and
+  "文件名说的就是这件事" -> "说明其用途" (the file *name* is the fact).
+- One inverts the meaning: "把同一个仓库的 model.onnx" -> "将本仓库的 model.onnx" (the same repository means the
+  model's, not this one).
+- Three flatten a bullet or numbered list into a single line.
+
+That last class is the interesting one: **rule 6 would not have caught it.** It compares the three languages
+with each other, and the damage would have been identical in all three. One idea was kept: the Chinese
+sentence about the provider now names its referent ("session 实际用的是哪个提供程序").
+
 ## Evidence
 
 - \`python -m pytest test/test_docs_index.py -q\` → **15 passed** (9 before: 6 new criteria).

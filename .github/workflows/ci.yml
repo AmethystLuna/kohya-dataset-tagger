@@ -1,0 +1,105 @@
+name: CI
+
+# What runs where, and why
+# ------------------------
+#   docs   -- the documentation structure gate. Standard library only, seconds, no dependencies:
+#             fast feedback on a broken link or an orphan topic file (see test/test_docs_index.py).
+#   tests  -- the unit suite on Linux and Windows. Linux is the "does it work off this machine"
+#             axis; Windows is the primary platform (DirectML, cmd.exe launchers, PowerShell).
+#   network-- the criteria that talk to a live third-party endpoint (huggingface.co / hf-mirror.com).
+#             They are excluded from the per-push run -- a third party must not be able to redden
+#             someone's pull request -- and probed on a schedule instead.
+#
+# The suite does not need the real training set or a downloaded tagger model: the criteria that do
+# skip themselves and say so (KOHYA_TAGGER_TEST_DATASET / KOHYA_TAGGER_TEST_MODELS point them at
+# your own). The acceptance suite (acceptance/) scores the generated dataset.toml against the
+# trainer's own config_util, so it stays a local gate -- it needs a real dataset and the trainer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    name: docs structure gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install pytest (the gate itself needs nothing else)
+        run: python -m pip install pytest
+      - name: Documentation structure gate
+        run: python -m pytest test/test_docs_index.py -q
+
+  tests:
+    name: tests · ${{ matrix.os }} · py${{ matrix.python }}
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"     # the floor pyproject.toml declares
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.10"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # The launcher criteria run scripts/start.sh --dry-run and require the repository's own .venv
+      # to exist, exactly as it does for a user who ran setup_env. So this job builds the real thing
+      # instead of installing into the runner's global interpreter.
+      - name: Create the repository's own .venv
+        run: python -m venv .venv
+
+      - name: Install the runtime and test dependencies
+        shell: bash
+        run: |
+          PY=".venv/bin/python"
+          [ -x "$PY" ] || PY=".venv/Scripts/python.exe"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install -r requirements.txt
+          "$PY" -c "import fastapi, PIL, numpy, onnxruntime, httpx; print('dependencies ok')"
+
+      - name: Unit suite
+        shell: bash
+        run: |
+          PY=".venv/bin/python"
+          [ -x "$PY" ] || PY=".venv/Scripts/python.exe"
+          "$PY" -m pytest test/ -q -n auto -m "not network"
+
+  network:
+    name: live endpoints (scheduled)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install the runtime and test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: huggingface.co and hf-mirror.com still list the same manifest
+        run: python -m pytest test/test_download.py -q -m network

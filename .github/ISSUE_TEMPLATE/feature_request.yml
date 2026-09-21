@@ -1,0 +1,31 @@
+name: Feature request
+description: A dataset-preparation job this tool made you do by hand
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful requests describe **the job you had to do by hand**, not the button you want.
+        This tool has a deliberately narrow scope: it prepares a kohya-style dataset directory. Training
+        itself belongs to the trainer, and this project will not grow a training UI.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The job you did by hand
+      description: What were you trying to get done, and what did you have to do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like it to do
+      description: Optional. If you already know how it should look on screen, say so.
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried first
+      description: Another tool, a script, or a manual pass. This is often the most useful part of the report.
+    validations:
+      required: false

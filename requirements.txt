@@ -1,0 +1,13 @@
+# Runtime dependencies (P0, spec §7). Dedicated venv: .venv (Python 3.10.11).
+# Do not install anything into the trainer's venv.
+fastapi>=0.141.1
+uvicorn>=0.53.0
+pillow>=12.3.0
+numpy>=2.2.6
+onnxruntime>=1.23.2
+# Runtime dependency: autotag/download.py uses it for streaming downloads (originally misplaced in the test dependencies)
+httpx>=0.28.1
+
+# Test dependencies
+pytest>=9.1.1
+pytest-xdist>=3.6   # -n auto: 1005 criteria in 74.5 s serial -> 25.2 s, identical result

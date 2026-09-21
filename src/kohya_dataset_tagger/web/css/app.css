@@ -1,0 +1,1359 @@
+/* Kohya Dataset Tagger - no-build frontend styles.
+   All user visible copy lives in js/strings.js; this file carries no text.
+   Every colour the UI paints comes from the three token blocks below; nothing
+   under them carries a colour literal (test/test_web_theme.py enforces both). */
+
+/* ---------------------------------------------------------------------------
+   Theme tokens - three :root-prefixed blocks, and no colour literal anywhere
+   below them.
+
+   The default is LIGHT, for every visitor on every OS. There is deliberately no
+   prefers-color-scheme branch and no "follow the system" third state: the theme
+   is a choice this app stores (js/theme.js, key "kdt.theme"), never a guess about
+   someone else's desktop. A stored choice has to be on the page before the first
+   paint, which is why js/theme-boot.js is a CLASSIC <head> script and not a
+   module - the measurement behind that is in changelog/light-mode.md.
+   --------------------------------------------------------------------------- */
+
+/* 1/3 - the light theme (the default), plus the values that are not colours.
+   Block 3 redefines exactly these colour names and no others. */
+:root {
+  color-scheme: light;
+
+  --bg: #f7f8fa;
+  --bg-panel: #ffffff;
+  --bg-elev: #eef1f5;
+  --line: #c6cdd7;
+  --text: #1b1f27;
+  --text-dim: #5b6472;
+  --accent: #2563eb;
+  --accent-dim: #dbe6ff;
+  --danger: #c02626;
+  --warn: #9a5b00;
+  --ok: #0f7a45;
+
+  /* The solid fill behind .btn-danger: a quiet danger surface, not an accent. */
+  --danger-bg: #f7dbdb;
+  /* Tints are a token's own value at low alpha, so a tint can never silently stop
+     following the theme - the "one number, one source" invariant. The two that
+     carry text (.diff .add / .diff .del) are tuned to keep that text >= 4.5:1. */
+  --tint-accent: rgba(37, 99, 235, .18);
+  --tint-warn: rgba(154, 91, 0, .12);
+  --tint-ok: rgba(15, 122, 69, .10);
+  --tint-danger: rgba(192, 38, 38, .14);
+
+  /* The transparency checkerboard behind a thumbnail, and the two surfaces of the
+     loading skeleton (the flat one is what reduced motion falls back to). */
+  --checker-a: #e9edf3;
+  --checker-b: #f4f6fa;
+  --skeleton-a: #e3e8ef;
+  --skeleton-b: #f4f7fb;
+  --skeleton-flat: #eaeef4;
+
+  /* The one popup shadow and the dialog shadow, and the two modal scrims. */
+  --shadow-menu: 0 8px 24px rgba(15, 23, 42, .14);
+  --shadow-dialog: 0 12px 40px rgba(15, 23, 42, .18);
+  --scrim-dialog: rgba(15, 23, 42, .38);
+  --scrim-zoom: rgba(15, 23, 42, .58);
+
+  --tile: 160px;
+  --radius: 6px;
+  /* Side panel widths: js/resizer.js rewrites these on the layout element when
+     a drag handle moves, and remembers them in localStorage. */
+  --left-w: 260px;
+  --right-w: 380px;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+/* 2/3 - the colours that sit ON the image rather than on the page. Written once,
+   under a selector that matches in both themes, because a later edit cannot drift
+   what only exists once: what these sit on is the picture, and a photograph's
+   pixels are not themed. A caption badge, a crop handle and a zoom arrow have to
+   read the same over a white photo and a black one. */
+:root,
+:root[data-theme="dark"] {
+  /* Caption-presence badges on a tile (their fill is --danger / --ok / the grey
+     below: the two that were already tokens keep following the theme). */
+  --badge-missing-fg: #fff;
+  --badge-ring: rgba(0, 0, 0, .5);
+  --badge-unknown-bg: #555b66;
+  --badge-unknown-fg: #fff;
+  --badge-present-bg: rgba(70, 192, 122, .85);
+  --badge-present-fg: #10231a;
+  /* The zoom preview: the stage is the mat around a picture, and the paging
+     arrows float on that mat - so their text is the light one in both themes
+     (--text would be near-black on it in light mode). */
+  --zoom-stage-bg: #101216;
+  --zoom-fg: #e6e9ef;
+  --zoom-nav-bg: rgba(20, 22, 26, .55);
+  --zoom-nav-bg-hover: rgba(20, 22, 26, .85);
+  --zoom-nav-border: rgba(255, 255, 255, .16);
+  /* The crop box: the outline, the shade outside it, the thirds guides and the
+     eight handles - every one of them drawn over the picture. */
+  --crop-outline: rgba(255, 255, 255, .9);
+  --crop-shade: rgba(0, 0, 0, .55);
+  --crop-guide: rgba(255, 255, 255, .45);
+  --crop-handle-bg: #fff;
+  --crop-handle-border: #111;
+}
+
+/* 3/3 - the dark theme. These are the values the UI had before light mode
+   existed: dark mode must not change at all, and test/test_web_theme.py pins
+   every one of them against the literals this file used to carry. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #14161a;
+  --bg-panel: #1b1e24;
+  --bg-elev: #22262e;
+  --line: #333a45;
+  --text: #e6e9ef;
+  --text-dim: #9aa4b2;
+  --accent: #4c8dff;
+  --accent-dim: #2b4f8f;
+  --danger: #ff5c5c;
+  --warn: #ffb020;
+  --ok: #46c07a;
+
+  --danger-bg: #5a2020;
+  --tint-accent: rgba(76, 141, 255, .18);
+  --tint-warn: rgba(255, 176, 32, .12);
+  --tint-ok: rgba(70, 192, 122, .14);
+  --tint-danger: rgba(255, 92, 92, .14);
+
+  --checker-a: #2a2e36;
+  --checker-b: #23262c;
+  --skeleton-a: #23262c;
+  --skeleton-b: #313640;
+  --skeleton-flat: #262a31;
+
+  --shadow-menu: 0 8px 24px rgba(0, 0, 0, .45);
+  --shadow-dialog: 0 12px 40px rgba(0, 0, 0, .45);
+  --scrim-dialog: rgba(0, 0, 0, .55);
+  --scrim-zoom: rgba(0, 0, 0, .72);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+/* The page is a column: [top bar][readiness strip][layout takes the rest]. The layout used to be
+   sized by a hard-coded "100% - 45px", which was already 3px short of the real top bar and would
+   have been wrong the moment the header grew a second row. */
+body { display: flex; flex-direction: column; }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+/* The readiness strip wraps onto its own row of the header (flex-basis 100%), under the controls. */
+.readiness {
+  flex: 1 1 100%;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px;
+  margin-top: 2px; padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+/* A segment is a button the way the toolbars' buttons are, plus a state colour. The colour is
+   decoration: every segment says in words what it is, so nothing depends on it alone. */
+.readiness-item { padding: 1px 8px; font-size: 12px; }
+.readiness-item.is-ok { color: var(--ok); border-color: var(--ok); }
+.readiness-item.is-todo { color: var(--warn); border-color: var(--warn); }
+.readiness-item.is-bad { color: var(--danger); border-color: var(--danger); }
+.readiness-item.is-busy { color: var(--text-dim); }
+/* "Every image has its caption" is an answer, not a broken button. */
+.readiness-item.is-ok:disabled { opacity: 1; cursor: default; }
+/* The brand is a lockup, not two lines of plain text: an accent rule marks its
+   left edge, the name sits over its credit, and the credit hangs a hair past
+   the name's right edge so the pair reads as a designed mark. It is the top
+   bar's first item again (the row's right end holds the two preferences and,
+   last, the command palette's entry), so the accent rule is the row's left
+   edge again. */
+.brand-lockup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent);
+}
+.brand {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.brand-by {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  /* Outward hang: the credit's right edge clears the name's, which is what
+     makes the lockup read as intentional instead of indented. */
+  margin-right: -0.35em;
+}
+.spacer { flex: 1 1 auto; }
+/* Where one group of controls ends and the next begins - today only the gallery toolbar
+   (scope | state ....... actions) needs one. Decoration only: it holds no text, nothing focuses
+   it and nothing announces it (aria-hidden in the markup), because a boundary is a fact about the
+   row, not a control. flex: 0 0 auto so it never absorbs the slack the .spacer is there to take;
+   18px tall, shorter than the tallest control of the row, so it cannot make the row grow. */
+.group-sep {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+}
+
+.pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.pill-ok { color: var(--ok); border-color: var(--ok); }
+.pill-bad { color: var(--danger); border-color: var(--danger); }
+.pill-idle { color: var(--text-dim); }
+
+/* One row: [left] [handle] [center] [handle] [right]. The handles are the 10px
+   gap the grid used to give; the side panels take their width from --left-w /
+   --right-w, which resizer.js rewrites during a drag. */
+.layout {
+  display: flex;
+  gap: 0;
+  padding: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  overflow: auto;
+  min-height: 0;
+}
+.panel-center { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+/* The left column is a fixed stack of headings and controls plus two
+   independently scrolling lists. It used to scroll as one block, so with 200+
+   subdirectories the roots, the "go up" button and the hint all scrolled out
+   of view together with the list; now only the lists scroll and the hint stays
+   pinned at the bottom. */
+.panel-left { display: flex; flex-direction: column; overflow: hidden; flex: 0 0 var(--left-w); width: var(--left-w); }
+.panel-left > #root-list { flex: 0 1 auto; max-height: 40%; min-height: 0; overflow-y: auto; }
+/* flex-basis must be 0, not auto: with 200+ directories an "auto" basis makes
+   the dir list's content height the shrink weight, which squeezes the one-row
+   root list down to a sliver. */
+.panel-left > #dir-list { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+.panel-left > .hint { flex: 0 0 auto; }
+/* The right column is [tabs][scrolling tab panels][pinned caption dock], and the
+   dock is deliberately outside .tab-panels: the editor of the active image must
+   stay on screen whichever tab is showing, which is the whole point of pinning
+   it. Before this the column scrolled as one block, so a long panel also took
+   the tab strip with it. */
+.panel-right {
+  flex: 0 0 var(--right-w); width: var(--right-w);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* The scope of the two panels that write captions: which images a run acts on. Hoisted out of
+   the panels on 2026-09-20 into one strip above .tab-panels, so both of them read one value and
+   the answer is on screen on every tab. flex: 0 0 auto for the reason .caption-dock has it: the
+   dock may take half the column, and the strip must not be squeezed by it. */
+.scope-strip {
+  flex: 0 0 auto;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px;
+  margin: 0 0 8px; padding: 5px 8px;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+}
+.scope-strip .field-inline { flex: 1 1 auto; min-width: 0; }
+.scope-strip select {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px;
+}
+.scope-strip .hint { flex: 1 1 100%; margin: 0; }
+.tab-panels { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.caption-dock {
+  flex: 0 0 auto; max-height: 50%; overflow-y: auto;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+/* The user's own choice, kept separate from #caption-form[hidden] (the component's
+   "no image to edit"): collapsing must survive an image change, which re-enables
+   the form, and must be undoable from the status line that stays visible. */
+.caption-dock.is-collapsed #caption-form { display: none; }
+
+/* Drag handles between the side panels and the gallery. The 10px column is the
+   visual gap; ::before is the 2px line inside it. */
+.resizer {
+  flex: 0 0 10px;
+  align-self: stretch;
+  position: relative;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--line);
+  opacity: .6;
+  transition: opacity .12s ease, background .12s ease;
+}
+.resizer:hover::before,
+.resizer:focus-visible::before,
+.resizer.is-dragging::before { background: var(--accent); opacity: 1; }
+.resizer:focus-visible { outline: 1px solid var(--accent); outline-offset: -3px; border-radius: 4px; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+.panel-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); margin: 10px 0 6px; }
+.panel-left .panel-title:first-child, .tab-panel .panel-title:first-child { margin-top: 0; }
+
+.hint { color: var(--text-dim); font-size: 12px; margin: 4px 0; }
+.mono { font-family: var(--mono); word-break: break-all; }
+.empty { color: var(--text-dim); text-align: center; margin-top: 24px; }
+
+/* What is narrowing the grid, one row above the grid it narrows. It is painted by
+   filter.js and hidden while nothing filters; the hiding is the global
+   "[hidden] { display: none !important; }" at the top of this file, which is what
+   lets this rule carry a display: of its own. */
+#gallery-filter {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+  margin: 4px 0 0; padding: 3px 8px;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+}
+/* The count is one short label; the chips take the rest of the row and wrap inside it. */
+#gallery-filter .chips { flex: 1 1 220px; min-width: 0; margin: 0; }
+
+/* The filtered empty state carries a bulk escape: the conditions themselves are one
+   chip each in #gallery-filter directly above, and this is the one click that clears
+   every one of them at the dead end where the user discovers it. */
+#btn-gallery-clear-filter { display: block; align-self: center; margin: 8px auto 0; }
+
+.btn {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--accent-dim); border-color: var(--accent); }
+.btn-danger { background: var(--danger-bg); border-color: var(--danger); }
+.btn-wide { width: 100%; margin-bottom: 6px; }
+.btn-mini { padding: 1px 6px; font-size: 12px; }
+/* An action drawn as a glyph instead of a word. The words do not disappear - they become the
+   accessible name and the tooltip (data-copy-aria / data-copy-title), because a glyph that becomes
+   the name gives a screen reader nothing to announce. Square-ish and no taller than a .btn, so the
+   row that holds it keeps its height. */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+}
+
+.row { display: flex; align-items: center; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
+.field { display: block; margin: 8px 0; }
+.field > span { display: block; color: var(--text-dim); font-size: 12px; margin-bottom: 2px; }
+.field input[type="text"], .field select, .field input[type="number"] {
+  width: 100%;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.field-inline { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); }
+/* The theme switch: index.html's first top-bar control. Styled as a switch (appearance:none, a
+   track and a ::before knob) rather than left as a native checkbox, because the other checkboxes
+   in this app are fields and this one is a state - the state has to be readable at a glance.
+   Colours are tokens only; the knob's motion is switched off in the reduced-motion block below,
+   together with the skeleton animation it sits next to. */
+.theme-switch { gap: 6px; }
+.theme-switch input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 16px;
+  margin: 0; /* the user agent's checkbox margin would push the switch off the row's centre line */
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  cursor: pointer;
+}
+.theme-switch input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform .12s ease, background .12s ease;
+}
+.theme-switch input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+.theme-switch input[type="checkbox"]:checked::before { transform: translateX(14px); background: var(--bg-panel); }
+.theme-switch input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The language switcher shares the top bar with the two checkboxes; give it the
+   same themed box as #filter-sort instead of the browser's default chrome. */
+#lang-select { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; }
+.box { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; margin: 10px 0; }
+/* Decorative, and sized: the label is a flex row, so an unsized svg would set its own height. */
+.field-icon { flex: 0 0 auto; width: 14px; height: 14px; }
+.box legend { color: var(--text-dim); font-size: 12px; padding: 0 4px; }
+.threshold-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.threshold-grid label { display: flex; align-items: center; gap: 6px; }
+.threshold-grid span { color: var(--text-dim); font-size: 12px; flex: 1 1 auto; }
+.threshold-grid input { width: 62px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; }
+.option-list label { display: block; margin: 4px 0; }
+
+.list { list-style: none; margin: 0; padding: 0; }
+.list li { margin: 2px 0; }
+.list button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.list button:hover { background: var(--bg-elev); }
+.list button.is-active { background: var(--accent-dim); border-color: var(--accent); }
+/* Navigation scroll (navscroll.js): the folder a navigation came out of. The
+   list is scrolled to it, so the mark is what explains the position instead of
+   letting it look like a random jump. */
+.list button.is-revealed { background: var(--accent-dim); border-color: var(--accent); }
+/* The count is a right hand column sized by its own content: it must not be
+   squeezed by a long name (flex: 0 0 auto) and must not break between the
+   number and its unit (white-space: nowrap). CJK breaks between any two
+   characters, so without this a long directory name wrapped the count onto a
+   second line. */
+.list .li-count {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: right;
+}
+/* The name is the only part allowed to shrink; min-width: 0 lifts the flex
+   automatic minimum so the ellipsis appears instead of overflowing. */
+.list .li-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* The breadcrumb row: the path on the left, the census of the directory it names on the right.
+   The census is a SIBLING of the nav, never a child - #breadcrumb is rebuilt with replaceChildren()
+   on every navigation, so a control inside it is destroyed by the next click. The row is what
+   carries the 6px gap the nav used to carry, so the centre panel's stack keeps its height. */
+.breadcrumb-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+/* The nav is the only part allowed to shrink: min-width: 0 lifts the flex automatic minimum (a flex
+   item's default minimum is its min-content size), so a long path wraps its own segments onto
+   another line instead of pushing the census out of the row. */
+.breadcrumb {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  flex: 0 1 auto; min-width: 0;
+}
+.breadcrumb button {
+  background: transparent; border: none; color: var(--accent);
+  cursor: pointer; padding: 2px 4px; border-radius: 4px;
+}
+.breadcrumb button:hover { background: var(--bg-elev); }
+.breadcrumb .sep { color: var(--text-dim); }
+.breadcrumb .current { color: var(--text); font-weight: 600; padding: 2px 4px; }
+/* Breadcrumb: each segment opens a dropdown of its siblings, the way VS Code's
+   breadcrumb does above the editor. The caret is drawn in CSS so the markup
+   carries no decoration. */
+.breadcrumb .crumb-slot { position: relative; display: inline-flex; }
+.breadcrumb .crumb-seg::after {
+  content: "\25be";
+  margin-left: 4px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.breadcrumb .crumb-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  margin-top: 2px;
+  padding: 4px;
+  min-width: 200px;
+  max-width: min(520px, 70vw);
+  max-height: 50vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow-menu);
+}
+.breadcrumb .crumb-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text);
+}
+.breadcrumb .crumb-item:hover { background: var(--bg-elev); }
+.breadcrumb .crumb-item.is-current { border-color: var(--accent); color: var(--accent); }
+.breadcrumb .crumb-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.breadcrumb .crumb-mark { flex: 0 0 auto; font-size: 12px; color: var(--text-dim); }
+.breadcrumb .crumb-choose { color: var(--text-dim); }
+/* The census, right-aligned by the .li-count technique and for the same reason - with a longer
+   subject. It is a right-hand column sized by its own content: it must not be squeezed by a long
+   path (flex: 0 0 auto) and must not break between the number and its unit (white-space: nowrap).
+   CJK breaks between any two characters, so without this the census line wrapped onto a second
+   line under a long path - and the path is the long thing here, not the count. */
+.breadcrumb-row .counts {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: right;
+}
+/* The grid's row. It WRAPS, and that is load-bearing: the wide packs (en/ja) put a longer label and
+   longer buttons in the same 578px row, and without wrapping the flex container squeezes its items
+   until they overflow the centre panel - which clips them, because .panel-center has
+   overflow: hidden. Wrapping moves what does not fit onto the next line instead of losing it. At
+   1280px in zh-CN the row still fits on one line (measured: 29.5px, unchanged). */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.selection-info { color: var(--text-dim); font-size: 12px; }
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile), 1fr));
+  gap: 8px;
+  overflow: auto;
+  padding: 6px 2px 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  outline: none;
+  align-content: start;
+  user-select: none;
+}
+.gallery:focus-visible { outline: 1px solid var(--accent); }
+
+/* A directory listing is in flight: the panels it will replace say so instead of
+   looking like a finished, empty result (the picker's list uses the same cue). */
+#dir-list.is-busy, .gallery.is-busy, .breadcrumb.is-busy { opacity: .55; }
+
+.tile { margin: 0; cursor: pointer; }
+.tile-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background:
+    conic-gradient(var(--checker-a) 25%, var(--checker-b) 0 50%, var(--checker-a) 0 75%, var(--checker-b) 0) 0 0 / 16px 16px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.tile-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tile-img.is-error { visibility: hidden; }
+/* While a thumbnail is in flight the frame's transparency checkerboard would
+   read as "this image has no pixels". The loader marks the <img> .is-loading
+   (a moving placeholder surface) and .is-loaded when the bitmap arrives, so the
+   tile also fades in instead of popping. */
+.tile-img, .dir-thumb { opacity: 0; transition: opacity .12s linear; }
+.tile-img.is-loaded, .dir-thumb.is-loaded,
+.tile-img.is-error, .dir-thumb.is-error { opacity: 1; }
+.tile-img.is-loading, .dir-thumb.is-loading {
+  background: linear-gradient(100deg, var(--skeleton-a) 30%, var(--skeleton-b) 50%, var(--skeleton-a) 70%);
+  background-size: 200% 100%;
+  animation: thumb-loading 1.2s linear infinite;
+}
+@keyframes thumb-loading {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-img, .dir-thumb { transition: none; }
+  .tile-img.is-loading, .dir-thumb.is-loading { animation: none; background: var(--skeleton-flat); }
+  /* The theme switch's knob slides; under reduced motion it jumps instead. */
+  .theme-switch input[type="checkbox"]::before { transition: none; }
+}
+.tile.is-selected .tile-frame { border-color: var(--accent); }
+.tile.is-active .tile-frame { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.tile.is-cursor .tile-frame { outline: 1px dashed var(--text-dim); outline-offset: 1px; }
+.tile-name {
+  font-size: 11px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px 1px;
+}
+.badge {
+  position: absolute; top: 4px; right: 4px;
+  min-width: 16px; height: 16px; line-height: 16px;
+  border-radius: 999px; text-align: center; font-size: 11px; font-weight: 700;
+  padding: 0 4px;
+}
+.badge-missing { background: var(--danger); color: var(--badge-missing-fg); box-shadow: 0 0 0 2px var(--badge-ring); }
+.badge-unknown { background: var(--badge-unknown-bg); color: var(--badge-unknown-fg); }
+.badge-present { background: var(--badge-present-bg); color: var(--badge-present-fg); }
+.tile-index { position: absolute; left: 4px; bottom: 2px; font-size: 11px; color: var(--text-dim); }
+
+/* Section 4.13: sub directory cards in the centre workspace. The thumbnail area
+   is always square, but how it is divided follows the folder: 1 image fills it,
+   2-4 make a 2x2, 5+ a 3x3 (the backend samples at most nine). */
+.gallery .dir-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dir-card .dir-thumbs {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--line);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dir-thumbs-1 { grid-template-columns: repeat(1, 1fr); grid-template-rows: repeat(1, 1fr); }
+.dir-thumbs-2 { grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 1fr); }
+.dir-thumbs-3 { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+.dir-card:hover .dir-thumbs { border-color: var(--accent-dim); }
+/* The folder the navigation came out of (navscroll.js); see the list row rule. */
+.dir-card.is-revealed .dir-thumbs { border-color: var(--accent); }
+.dir-card:focus-visible { outline: none; }
+.dir-card:focus-visible .dir-thumbs { border-color: var(--accent); }
+.dir-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-elev);
+}
+.dir-thumb.is-error { visibility: hidden; }
+.dir-card .dir-name {
+  font-size: 11px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px 1px 0;
+}
+.dir-card .dir-count { font-size: 11px; color: var(--text-dim); padding: 0 1px; }
+
+.marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: var(--tint-accent);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.tab {
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 4px 4px 0 0; padding: 4px 10px; cursor: pointer;
+}
+.tab.is-active {
+  background: var(--accent-dim); border-color: var(--accent);
+  /* colour alone does not say "selected" to everyone: the underline does */
+  font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.preview { display: flex; gap: 8px; align-items: flex-start; }
+.preview-img {
+  width: 120px; height: 120px; object-fit: contain;
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+}
+/* No image active = no box at all: the dock then shows exactly one line (the
+   empty state in #active-meta) instead of a blank frame above it. */
+.preview-img:not([src]) { display: none; }
+.meta { color: var(--text-dim); font-size: 12px; word-break: break-all; }
+
+.warning {
+  margin: 8px 0; padding: 6px 8px;
+  border: 1px solid var(--warn); border-left-width: 4px;
+  background: var(--tint-warn); border-radius: 4px;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; min-height: 24px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 4px 1px 8px; font-size: 12px;
+}
+.chip .chip-remove { border: none; background: transparent; color: var(--text-dim); cursor: pointer; padding: 0 2px; }
+.chip .chip-remove:hover { color: var(--danger); }
+.chip.is-editing input { width: 12ch; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; }
+.chip-tag-empty { color: var(--warn); }
+.chip-state-only { border-color: var(--accent); background: var(--accent-dim); }
+.chip-state-include { border-color: var(--ok); }
+.chip-state-exclude { border-color: var(--danger); text-decoration: line-through; }
+
+.suggest-wrap { position: relative; flex: 1 1 auto; }
+.tag-input-row { display: flex; gap: 6px; align-items: flex-start; }
+.tag-input-row input {
+  width: 100%; background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 4px; padding: 4px 6px;
+}
+.suggest {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+  background: var(--bg-elev); border: 1px solid var(--accent);
+  border-radius: 4px; max-height: 220px; overflow: auto;
+}
+.suggest-item { padding: 3px 6px; cursor: pointer; display: flex; gap: 6px; }
+.suggest-item.is-active, .suggest-item:hover { background: var(--accent-dim); }
+.suggest-item .s-cat { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.save-state { color: var(--text-dim); font-size: 12px; }
+.save-state.is-dirty { color: var(--warn); }
+.save-state.is-saved { color: var(--ok); }
+.save-state.is-error { color: var(--danger); }
+.raw-text {
+  width: 100%; min-height: 90px; background: var(--bg-elev);
+  border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+  font-family: var(--mono); font-size: 12px;
+}
+
+.filter-count { color: var(--text); font-weight: 600; }
+.freq-list { display: flex; flex-wrap: wrap; gap: 4px; max-height: 45vh; overflow: auto; }
+.freq-item {
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; cursor: pointer; font-size: 12px;
+  /* it is a <button>: keep the chip look, drop the user-agent chrome */
+  color: inherit; font-family: inherit; line-height: inherit;
+}
+.freq-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Spoken, not seen: the only copy that tells a screen reader what a control's
+   state is when the visible signal is a colour. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  border: 0;
+}
+.freq-item .f-count { color: var(--text-dim); margin-left: 4px; }
+.freq-item.chip-state-only { background: var(--accent-dim); border-color: var(--accent); }
+.freq-item.chip-state-include { border-color: var(--ok); }
+.freq-item.chip-state-exclude { border-color: var(--danger); text-decoration: line-through; }
+
+/* Filter navigation. The table holds 1500+ tags, so the search box is the
+   primary entry point and must be the flexible part of the row. */
+#filter-search {
+  flex: 1 1 120px; min-width: 0;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 4px; padding: 4px 6px;
+}
+#filter-sort { flex: 0 0 auto; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+
+/* Batch editing (web/js/batch.js).
+   The common-tag editor is a ROW LIST, not a comma separated text box: every
+   row is one tag, so clearing a row removes exactly that tag. In a text box,
+   deleting the third of five entries would shift the two after it and silently
+   rename tags the user never touched. */
+.batch-scope { color: var(--text); }
+.batch-section { margin: 8px 0; }
+.batch-common-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
+.batch-common-row { display: flex; gap: 4px; align-items: center; }
+.batch-common-input {
+  flex: 1 1 auto; min-width: 0;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-radius: 4px; padding: 3px 6px;
+}
+.batch-common-input.is-removed { text-decoration: line-through; color: var(--danger); border-color: var(--danger); }
+.batch-common-remove { flex: 0 0 auto; }
+.batch-added { min-height: 0; }
+
+.progress { margin: 8px 0; }
+.progress-track { height: 8px; background: var(--bg-elev); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); }
+.progress-fill { height: 100%; width: 0; background: var(--accent); transition: width .15s linear; }
+.errors { color: var(--danger); font-size: 12px; max-height: 120px; overflow: auto; }
+
+.diff { margin-top: 6px; }
+.diff table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.diff th, .diff td { border: 1px solid var(--line); padding: 3px 5px; text-align: left; vertical-align: top; }
+.diff th { color: var(--text-dim); font-weight: 500; }
+.diff td.before { color: var(--text-dim); }
+/* The preview's whole job is to show what writing would change, so added tags
+   are boxed green and removed ones boxed red with a strike. The before column
+   used to be plain text: a removed tag was invisible, and the .del rule had no
+   producer in any module. Each class keeps its own rule (no shared selector)
+   so a test can read either one without matching the other.
+   .cleared is the third case: an existing caption would be wiped, so the "none"
+   on the right is boxed red too - without a strike (nothing was deleted from a
+   list, the whole caption is gone). */
+.diff .add {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--ok);
+  border: 1px solid var(--ok);
+  background: var(--tint-ok);
+}
+.diff .del {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: var(--tint-danger);
+  text-decoration: line-through;
+}
+.diff .cleared {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: var(--tint-danger);
+}
+.diff .diff-img { width: 48px; height: 48px; object-fit: contain; background: var(--bg-elev); }
+.diff .row-click { cursor: pointer; }
+
+.cache-list { display: flex; flex-direction: column; gap: 4px; }
+.cache-item {
+  display: flex; gap: 6px; align-items: center;
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px;
+}
+.cache-item .c-path { font-family: var(--mono); font-size: 11px; word-break: break-all; flex: 1 1 auto; }
+
+.toasts {
+  position: fixed; right: 12px; bottom: 12px; z-index: 50;
+  display: flex; flex-direction: column; gap: 6px; max-width: 420px;
+  /* Errors stay until dismissed now, so the stack needs a ceiling of its own. */
+  max-height: 60vh; overflow: auto;
+}
+.toast {
+  background: var(--bg-elev); border: 1px solid var(--line);
+  border-left-width: 4px; border-radius: 4px; padding: 6px 10px;
+  font-size: 12px; word-break: break-word;
+  display: flex; align-items: center; gap: 6px;
+}
+.toast-text { flex: 1 1 auto; }
+.toast-info { border-left-color: var(--accent); }
+.toast-ok { border-left-color: var(--ok); }
+.toast-warn { border-left-color: var(--warn); }
+.toast-error { border-left-color: var(--danger); }
+
+/* The job shelf (js/jobs.js): every running job, whichever tab started it. Bottom left so it can
+   never cover the toasts, and outside the panels so switching tabs cannot hide it. */
+.job-shelf {
+  position: fixed; left: 12px; bottom: 12px; z-index: 40;
+  display: flex; flex-direction: column; gap: 6px; max-width: 420px;
+  max-height: 40vh; overflow: auto;
+}
+.job-row {
+  background: var(--bg-elev); border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 8px; font-size: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.job-label {
+  background: none; border: 1px solid var(--line); border-radius: 4px;
+  color: var(--accent); cursor: pointer; padding: 1px 6px; font-size: 12px;
+}
+.job-progress { flex: 1 1 auto; word-break: break-all; }
+
+/* ---------------------------------------------------------------------------
+   Runtime editable path configuration (section 4.11): the roots header, the
+   inline "add root" row and the model search roots dialog.
+   --------------------------------------------------------------------------- */
+.panel-head { display: flex; align-items: center; gap: 6px; margin: 10px 0 6px; }
+.panel-head .panel-title { margin: 0; flex: 1 1 auto; }
+.panel-left .panel-head:first-child { margin-top: 0; }
+
+.root-add-form { margin: 4px 0 8px; }
+.root-add-form input[type="text"], .dialog input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.root-missing { color: var(--danger); }
+
+.list li.root-item { display: flex; align-items: center; gap: 4px; }
+.root-item > .btn-link { width: auto; flex: 1 1 auto; min-width: 0; }
+
+.list .root-remove, .list .model-root-remove {
+  flex: 0 0 auto;
+  width: auto;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.list .root-remove:hover:not(:disabled), .list .model-root-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.list .root-remove:disabled, .list .model-root-remove:disabled { opacity: .45; cursor: not-allowed; }
+
+.model-roots-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.list li.model-root-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.model-root-item .li-name { flex: 1 1 160px; min-width: 0; }
+.badge-source {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+}
+.badge-source.is-file { border-color: var(--accent); color: var(--accent); }
+.badge-source.is-session { border-color: var(--warn); color: var(--warn); }
+.badge-session { font-size: 11px; color: var(--warn); }
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--scrim-dialog);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  width: min(620px, 94vw);
+  max-height: 84vh;
+  overflow: auto;
+  box-shadow: var(--shadow-dialog);
+}
+.dialog-head { display: flex; align-items: center; gap: 8px; }
+/* A dialog's name is a TITLE, not a caption. `.panel-title` is the small uppercase label that heads a
+   panel's block (12px, dim, letter-spaced) - right above a block of fields, wrong for the name of a
+   surface: the rows and fields it names are 13px in var(--text), so the title read as smaller AND
+   quieter than its own content, and the close button beside it was the loudest thing in the head.
+   Scoped to `.dialog-head` on purpose: the picker, the model directories, the crop dialog, the
+   confirm dialog and the command panel all carry a `.panel-title` inside one, and a name is a title
+   on every surface. The 15px line box (22.5px) still fits the head's own height, which the
+   `.btn-mini` close button (22px) sets - measured, see changelog/command-bar-and-census-row.md.
+   The scale this states: title 15 > input and rows 13 > reasons, status and footer 12 > group heads
+   11 (deliberately the quiet label; nothing inflates them). */
+.dialog-head .panel-title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* ---------------------------------------------------------------------------
+   Section 4.12: the graphical dataset directory picker, and the dataset path
+   readout that now doubles as its entry point.
+   --------------------------------------------------------------------------- */
+.path-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px dashed var(--line);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  color: var(--text);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.path-line:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.path-line:disabled { cursor: default; opacity: .75; border-style: solid; }
+
+.picker-dialog { width: min(680px, 94vw); }
+/* The path field and the "new directory" field are plain .dialog inputs; the
+   rows only carry the vertical rhythm. */
+.picker-path-row { margin: 8px 0 6px; }
+.picker-newdir-row { margin: 0 0 6px; }
+.picker-jumps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; }
+.picker-jump {
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-list {
+  max-height: 46vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px;
+}
+.picker-list.is-busy { opacity: .55; }
+.picker-list li.picker-item { margin: 1px 0; }
+.picker-dir { width: 100%; text-align: left; }
+/* The directory a step in the picker came out of (navscroll.js). */
+.picker-dir.is-revealed { background: var(--accent-dim); border-color: var(--accent); }
+/* ---------------------------------------------------------------------------
+   Enlarged preview (double-click a tile): the image on the left, the tag
+   editor for that same image on the right, side by side.
+   --------------------------------------------------------------------------- */
+.zoom-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--scrim-zoom);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.zoom-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-dialog);
+  width: min(1400px, 96vw);
+  height: min(900px, 92vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.zoom-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.zoom-head .panel-title { margin: 0; }
+.zoom-path {
+  color: var(--text-dim);
+  font-size: 12px;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zoom-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.zoom-stage {
+  position: relative; /* anchors the side paging arrows below */
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--zoom-stage-bg);
+  overflow: hidden; /* the bitmap is transformed, never scrolled */
+  touch-action: none; /* a drag pans the bitmap instead of scrolling the page */
+  padding: 8px;
+}
+.zoom-img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  user-select: none; -webkit-user-drag: none; /* pan must not start a native image drag */
+}
+/* Viewer states (js/zoom.js): the cursor is the only cue that the picture itself
+   is draggable once it is larger than the stage. */
+.zoom-stage.is-zoomed { cursor: grab; }
+.zoom-stage.is-panning { cursor: grabbing; }
+/* Previous/next are gallery arrows pinned to the left and right of the picture,
+   not header buttons: they used to sit in .zoom-head, far from what they change.
+   The chevron is decoration; the accessible name lives in the aria-label that
+   js/zoom.js sets (the copy is still strings.js "zoom.prev"/"zoom.next"). */
+.zoom-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 40px;
+  height: 72px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--zoom-fg);
+  background: var(--zoom-nav-bg);
+  border: 1px solid var(--zoom-nav-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  opacity: .8;
+  transition: opacity .12s ease, background .12s ease, border-color .12s ease;
+}
+.zoom-nav:hover,
+.zoom-nav:focus-visible {
+  opacity: 1;
+  background: var(--zoom-nav-bg-hover);
+  border-color: var(--accent);
+}
+.zoom-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.zoom-nav:disabled { opacity: .35; cursor: not-allowed; }
+.zoom-nav-prev { left: 10px; }
+.zoom-nav-next { right: 10px; }
+.zoom-tags {
+  flex: 0 0 340px;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding: 10px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.zoom-tags .zoom-chips { flex: 0 1 auto; max-height: 40%; overflow: auto; }
+.zoom-tags .raw-text { min-height: 140px; }
+
+.zoom-file { overflow-wrap: anywhere; }
+
+
+/* ---------------------------------------------------------------------------
+   Section 4.17: the crop confirmation dialog. A crop tool is a rectangle with
+   handles over the image, so the geometry lives in the stylesheet (percentages
+   for the thirds, offsets for the handles) and js/crop.js only moves the box by
+   setting left/top/width/height in CSS pixels. The shade outside the box is a
+   spread box-shadow rather than four overlay divs: one node, no seams.
+   --------------------------------------------------------------------------- */
+.crop-dialog { width: min(940px, 96vw); }
+.crop-dialog .crop-toolbar { align-items: flex-end; }
+.crop-rect { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.crop-rect input { width: 100%; }
+.crop-stage {
+  position: relative;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto;
+  overflow: hidden;
+  line-height: 0;
+  /* A drag is a crop, not a page scroll: let the pointer own the gesture. */
+  touch-action: none;
+}
+.crop-image {
+  display: block;
+  max-width: 100%;
+  max-height: 56vh;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.crop-box {
+  position: absolute;
+  left: 0;
+  top: 0;
+  outline: 1px solid var(--crop-outline);
+  box-shadow: 0 0 0 9999px var(--crop-shade);
+  cursor: move;
+}
+.crop-guide { position: absolute; background: var(--crop-guide); pointer-events: none; }
+.crop-guide.v1 { left: 33.333%; top: 0; bottom: 0; width: 1px; }
+.crop-guide.v2 { left: 66.666%; top: 0; bottom: 0; width: 1px; }
+.crop-guide.h1 { top: 33.333%; left: 0; right: 0; height: 1px; }
+.crop-guide.h2 { top: 66.666%; left: 0; right: 0; height: 1px; }
+.crop-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--crop-handle-bg);
+  border: 1px solid var(--crop-handle-border);
+  border-radius: 2px;
+}
+.crop-handle.nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.crop-handle.n { left: 50%; margin-left: -6px; top: -6px; cursor: ns-resize; }
+.crop-handle.ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.crop-handle.e { right: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+.crop-handle.se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.crop-handle.s { left: 50%; margin-left: -6px; bottom: -6px; cursor: ns-resize; }
+.crop-handle.sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.crop-handle.w { left: -6px; top: 50%; margin-top: -6px; cursor: ew-resize; }
+.crop-actions { justify-content: flex-end; }
+.crop-actions .btn-primary { margin-left: auto; }
+
+/* ---------------------------------------------------------------------------
+   The command bar and its dropdown (T3). The bar is the palette's entry: shaped
+   like the search field it opens, it is the header row's LAST control. The panel
+   is a DROPDOWN anchored to that bar, not a modal - it has no backdrop and no
+   aria-modal, Tab leaves it, and a click anywhere else closes it (js/palette.js).
+   --------------------------------------------------------------------------- */
+/* The wrapper exists to be the panel's containing block: position: relative here is
+   what lets the panel be absolute inside the header (so it costs the row no height)
+   while still hanging over the page below it. */
+.palette-bar-wrap { position: relative; display: flex; flex: 0 0 auto; }
+/* The bar itself. No taller than a .btn (4px padding, a 19px line box, 1px border),
+   so the header row it ends cannot grow; the width is what makes it read as a field
+   rather than as one more button. */
+.palette-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: clamp(150px, 18vw, 240px);
+  padding: 4px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text-dim);
+  text-align: left;
+}
+.palette-bar:hover { border-color: var(--accent); }
+.palette-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The invitation, not the name: palette.openTitle is the accessible name, and this is
+   the input's own placeholder too - so while the panel is open it steps aside instead
+   of saying the same sentence twice, twenty pixels apart. */
+.palette-bar-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.palette-bar[aria-expanded="true"] .palette-bar-hint { visibility: hidden; }
+/* The gesture, drawn as a keycap. Its text is the pack's palette.openKey - a key NAME,
+   identical in every language, and palette.openTitle CONTAINS it, so the visible text
+   is part of the accessible name (WCAG 2.5.3, label in name). */
+.palette-key {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+/* The panel's head is a chrome row HERE and nowhere else: every other dialog's head is followed by a
+   hint paragraph that is part of its body, while this one is followed by the control the surface is
+   FOR - the input. Without a rule the name sat above the field looking like its caption. */
+.palette-pop .dialog-head { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+/* The dropdown: absolute inside the bar's wrapper, so it takes no row space in the
+   header and hangs over whatever is below. z-index 30 is the number the breadcrumb's
+   dropdown already uses for "a surface floating over the page"; the header is itself
+   a stacking context at 20 (above the panels) and the shelf and the toasts sit outside
+   it at 40 and 50, so this panel is above every panel and below every toast whatever
+   number it is given - 30 is the honest reading of "one step above the page". */
+.palette-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(560px, 94vw);
+  max-height: 84vh;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-dialog);
+  display: flex;
+  flex-direction: column;
+  /* The list scrolls, the panel does not: a long result list must not push the
+     input off the top of the screen. */
+  overflow: hidden;
+}
+.palette-input {
+  width: 100%;
+  margin: 8px 0 6px;
+  padding: 6px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.palette-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The scroll container: js/palette.js moves the active row with revealRow(), which
+   needs one bounded scroller it may touch and nothing else. */
+.palette-list { overflow: auto; max-height: min(46vh, 420px); margin: 0 0 6px; }
+/* The group heads are BANDS, not headings: a rounded strip of --bg-elev behind the quiet 11px label.
+   Two reasons for the surface. It is what makes the group boundary visible while scanning a list whose
+   rows are 13px - the heads were the same weight of small dim text as the panel's own caption before
+   the scale above existed. And it is the only token it may use: --text-dim on --bg-elev is one of the
+   pairs test_web_theme.py already computes and falsifies (5.28:1 light, 6.01:1 dark), while a tint
+   (--tint-accent) would be an unmeasured claim. The 8px horizontal padding is the ROWS' padding
+   (.palette-item below), which is what makes the band's text line up with the text it heads; the
+   radius is this app's row-control radius (4px), not a chip's pill. The 4px top margin is UNIFORM,
+   including on the first band: the list has no top padding of its own, so "the first band keeps the
+   list's own spacing" would mean a second spacing for one boundary - and an earlier attempt at that
+   (`.palette-group-head:first-child { margin-top: 0 }`) matched EVERY band, because each one is the
+   first child of its own .palette-group box, and flattened the top margin to 0 on all six. The
+   rendered margins are measured in the probe's own JSON. */
+.palette-group-head {
+  padding: 3px 8px;
+  margin: 4px 0 3px;
+  background: var(--bg-elev);
+  border-radius: 4px;
+  font-size: 11px;
+  letter-spacing: .06em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+/* A row is a real choice, not a link: it carries the accessible state (aria-disabled,
+   aria-selected) and the click delegate lives here. */
+.palette-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.palette-item.is-active { background: var(--accent-dim); }
+.palette-item.is-unavailable { cursor: not-allowed; }
+.palette-item.is-unavailable .palette-label { color: var(--text-dim); }
+/* Why the row cannot run: the answer, not a decoration. It stays on screen while the
+   row is merely hovered, because "shown, not hidden, with its reason" is the point. */
+.palette-why { margin-left: auto; color: var(--warn); font-size: 12px; text-align: right; }
+.palette-item.is-unavailable .palette-why { color: var(--text-dim); }

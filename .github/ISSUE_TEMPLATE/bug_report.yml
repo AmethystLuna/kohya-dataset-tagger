@@ -1,0 +1,66 @@
+name: Bug report
+description: Something behaved differently from what the documentation says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: this tool edits the **captions** of a training set. If a caption came out wrong,
+        please say which file and what it contained — and check `_trash/` and the `.bak` next to it first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The observable behavior. If there was an error message, paste it verbatim.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: A sentence is enough. If the README or a screen says it should behave differently, quote it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. start.bat
+        2. root = D:\datasets\my-lora
+        3. open the 1_post folder, select "select images missing a caption"
+        4. press Run on the tagger panel
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Tagger provider
+      description: The output of `.venv\Scripts\python.exe tools\check_provider.py`. A silent CPU fallback is a common cause of "it is 4x slower".
+      placeholder: "DirectMLExecutionProvider"
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version (`.venv\Scripts\python.exe -V`), browser and version.
+      placeholder: "Windows 11 24H2, Python 3.10.11, Chrome 141"
+    validations:
+      required: true
+  - type: input
+    id: dataset-shape
+    attributes:
+      label: Dataset shape
+      description: Roughly how many subdirectories and images. Do not paste private paths if you would rather not — the shape is what matters.
+      placeholder: "219 subdirectories, ~1650 images"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log
+      description: The console output while the problem happened. It is colored; pasting it as-is is fine.
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,19 @@
+# Default everything to LF (.md / .py / frontend assets / .ps1). Without this rule,
+# core.autocrlf=true on Windows rewrites line endings on every checkout, creating diff noise.
+* text=auto eol=lf
+
+# **Windows batch files must be CRLF.** cmd.exe mis-parses LF-terminated .bat files inside
+# parenthesized multi-line blocks (if errorlevel 1 ( ... )) and around labels/goto - and the two
+# launchers at the root contain exactly such blocks.
+# Hit on 2026-09-17: the working tree had the CRLF I wrote, but git said to check out LF,
+# so it **looked fine locally and only broke on a fresh clone**.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Do not do line-ending conversion on binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.onnx binary
+*.safetensors binary

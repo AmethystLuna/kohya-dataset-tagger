@@ -1,0 +1,17 @@
+# Extra tagger model scan paths. One per line (semicolon-separated also works); lines starting with # are comments.
+#
+# When to use it: your models are not in the repo's models/ but somewhere else.
+#   D:\my-taggers
+#   E:\stable-diffusion-webui\models\tagger
+#
+# Note the difference from KOHYA_TAGGER_MODELS / --models:
+#   that one **replaces** the search list entirely (set it and you lose the repo's models/ and every auto-discovered location);
+#   the paths in this file are **appended** after the default list.
+#
+# The **order of the search roots is the priority** (a model with the same name is taken from the first hit):
+#   repo models/  ->  what is listed here  ->  %LOCALAPPDATA%/kohya-dataset-tagger/models  ->  HF cache
+#
+# Restart the service (start.bat) after editing this file. You can also add/remove entries directly in the UI
+# (tagger panel -> "Model directories..."), which takes effect immediately and writes back to this file.
+#
+# Copy this file to model_paths.txt and use that (the latter is the local, gitignored file).

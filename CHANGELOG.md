@@ -10,6 +10,18 @@ dataset) is not repeated here: it lives next to the code, in
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-01
+
+### Fixed
+
+- **`start.bat` refused to start once a dataset root had been added from the UI.** The Windows
+  launcher read `roots.txt` with PowerShell's default encoding — the ANSI code page, 936 on a Chinese
+  Windows — while the server writes that file as UTF-8 **without a BOM**. A root containing non-ASCII
+  characters therefore came back as mojibake and the launcher stopped with "These directories do not
+  exist or are not directories". It now reads the file as UTF-8, which keeps the BOM that PowerShell
+  itself writes on the first interactive run working too. The same line also crashed on an empty
+  `roots.txt` (`Get-Content -Raw` is `$null` there) before it could ask; it asks now.
+
 ## [0.1.0] - 2026-09-21
 
 The first public release. The `dataset.toml` it generates is scored in acceptance by the trainer's
@@ -52,5 +64,6 @@ own `config_util`, not by a fixture of our own.
 - The service listens on `127.0.0.1` only. See [SECURITY.md](SECURITY.md) before changing that.
 - Requires Python 3.10 or newer. Torch is not needed.
 
-[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.0

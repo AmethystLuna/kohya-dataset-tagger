@@ -25,7 +25,9 @@ Testing only "it passes right now" does not count as a criterion.
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import socket
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -111,19 +113,58 @@ def run_script(args, *, env_extra=None, cwd=REPO, timeout=120):
     )
 
 
-def run_ps1(args, *, env_extra=None, cwd=REPO, timeout=120):
-    """Run a .ps1 (Windows PowerShell 5.1) -- it decodes byte for byte, the same path as actually running it."""
+def run_ps1(args, *, env_extra=None, cwd=REPO, timeout=120, stdin_text=None):
+    """Run a .ps1 (Windows PowerShell 5.1) -- it decodes byte for byte, the same path as actually running it.
+
+    `stdin_text` feeds a **real stdin** (the interactive "type your dataset root" branch reads it);
+    without it stdin is closed, which is what a launcher run from a scheduled task sees.
+    """
     assert POWERSHELL is not None
     env = os.environ.copy()
     env.pop("KOHYA_TAGGER_PIP_INDEX", None)
     if env_extra:
         env.update(env_extra)
+    piped = {"input": stdin_text} if stdin_text is not None else {"stdin": subprocess.DEVNULL}
     return subprocess.run(
         [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
          *[str(a) for a in args]],
-        cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, capture_output=True,
+        cwd=str(cwd), env=env, **piped,
+        capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=timeout,
     )
+
+
+def free_port() -> int:
+    """A port nothing is listening on, so the launcher does not print its "port is taken" warning.
+
+    That warning goes through Write-Host, i.e. onto the same stdout the dry-run parser reads, and
+    `parse_dry_run` deliberately refuses any line that is not DRY_RUN_.
+    """
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def fake_repo_with_a_venv(tmp_path: Path) -> Path:
+    """A copy of scripts/start.ps1 under a fake repository root whose .venv already exists.
+
+    -DryRun only Test-Path's the interpreter, so an empty file is enough. The copy is the point: the
+    criteria can drive the launcher's own reading of roots.txt without touching the real one at the
+    repository root (and the port is passed in, so they cannot collide with a running service).
+    """
+    fake = tmp_path / "fake-repo"
+    (fake / "scripts").mkdir(parents=True)
+    (fake / ".venv" / "Scripts").mkdir(parents=True)
+    (fake / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
+    shutil.copy(REPO / "scripts" / "start.ps1", fake / "scripts" / "start.ps1")
+    return fake
+
+
+def run_fake_start_ps1(fake: Path, roots_bytes: bytes, *, stdin_text=None):
+    """Run the copied launcher in dry-run mode against a roots.txt written **byte for byte**."""
+    (fake / "roots.txt").write_bytes(roots_bytes)
+    return run_ps1([fake / "scripts" / "start.ps1", "-DryRun", "-Port", str(free_port())],
+                   cwd=fake, stdin_text=stdin_text)
 
 
 # --------------------------------------------------------------------------- checkers
@@ -256,6 +297,24 @@ def setup_pip_problems(dry: DryRun, *, want_gpu: str, must_have=(),
             "DRY_RUN_INDEX's first choice is %r, expected %r (an explicit --index-url is required; falling back to global pip config is not allowed)"
             % (dry.index, want_index))
     return problems
+
+
+def flat_text(text: str) -> str:
+    """Join the wrapped lines and collapse runs of spaces, because PowerShell **breaks its error text mid-word**.
+
+    Measured 2026-10-01: the console showed "You cannot call a method on a null-valued e\\nxpression", so
+    a plain substring search for that message reported "not found" for text that was right there -- a
+    criterion that is green because it cannot see the failure. Note that the break is **removed**, not
+    replaced by a space: turning it into a space gives "null-valued e xpression", which matches nothing.
+    """
+    return re.sub(r"[ \t]+", " ", text.replace("\r\n", "").replace("\n", "").replace("\r", ""))
+
+
+def roots_arg_problems(dry: DryRun, root: Path) -> list[str]:
+    """The launcher must hand the server the **same** path that roots.txt holds -- not a mojibake of it."""
+    if str(root) not in dry.args:
+        return ["the root from roots.txt did not survive: %r is not in %r" % (str(root), list(dry.args))]
+    return []
 
 
 # --------------------------------------------------------------------------- 0. keep the criteria from idling
@@ -474,6 +533,124 @@ def test_start_sh_without_a_venv_says_what_to_run(tmp_path: Path) -> None:
     assert "setup_env.sh" in proc.stderr, "did not tell the user to run ./setup_env.sh first: %s" % proc.stderr
 
 
+# --------------------------------------------------------------------------- 3b. start.ps1 --dry-run
+# Why these exist (measured 2026-10-01): `start.bat` refused to start, saying
+#
+#     These directories do not exist or are not directories:
+#         E:\Downloads\fanbox\銇汇亞銇嶆槦
+#
+# The mojibake in the message **is** the diagnosis. roots.txt is UTF-8, but the server rewrites it
+# BOM-less (`config._write_atomic`), and Windows PowerShell 5.1's `Get-Content` defaults to the ANSI
+# code page (936 on this machine) -- so `E:\Downloads\fanbox\ほうき星` came back as `銇汇亞銇嶆槦` and
+# `Test-Path` called a directory that is sitting right there missing. The launcher's **first**
+# interactive run writes a BOM, which is what made 5.1 guess UTF-8 correctly and hid the bug until the
+# first root was added from the UI (the server strips the BOM again when it rewrites the file).
+#
+# The .sh launcher reads bytes and was never affected; these criteria are the Windows half of the
+# same "both launchers read the same roots.txt" promise (p0-spec §7 / A32).
+#
+# Why the criteria below assert "it started", not "argv contains データセット": PowerShell encodes a
+# **redirected** stdout with the console code page, measured 2026-10-01 as 65001 under the DSH harness,
+# 936 from an ordinary console on this machine, and 437 on a typical CI runner -- at 437 the katakana
+# come back as `??????` and a string comparison would be red on a machine where the launcher is fine.
+# The launcher's own `Test-Path -PathType Container` is the evidence that the decoded path is the real
+# directory, and `test_roots_arg_gate_goes_red_on_a_mojibake_root` proves mojibake cannot pass it.
+def assert_started_with_the_root(proc, *, count: int = 1) -> DryRun:
+    """The launcher got past its root check and reached the dry-run print, with one `--roots` per root."""
+    combined = proc.stdout + proc.stderr
+    assert "do not exist" not in combined, (
+        "the launcher called an existing root missing -- a mojibake decode of roots.txt:\n%s" % combined)
+    assert proc.returncode == 0, combined
+    dry = parse_dry_run(proc.stdout)
+    assert dry.args.count("--roots") == count, "expected %d --roots, argv is %r" % (count, list(dry.args))
+    return dry
+
+
+@needs_powershell
+def test_start_ps1_reads_a_utf8_roots_file_without_a_bom(tmp_path: Path) -> None:
+    """The shape **the server** writes: UTF-8, no BOM, LF."""
+    fake = fake_repo_with_a_venv(tmp_path)
+    root = tmp_path / "データセット"        # non-ASCII on purpose: an ASCII path cannot fail this way
+    root.mkdir()
+    proc = run_fake_start_ps1(fake, (str(root) + "\n").encode("utf-8"))
+
+    assert_started_with_the_root(proc)
+
+
+@needs_powershell
+def test_start_ps1_reads_a_bom_crlf_roots_file(tmp_path: Path) -> None:
+    """The other shape on this machine: PowerShell 5.1's own `Set-Content -Encoding UTF8` writes BOM + CRLF.
+
+    Both writers must read back identically, otherwise "it worked yesterday" depends on which one
+    touched the file last -- and the two launchers would disagree about the same roots.txt.
+    """
+    fake = fake_repo_with_a_venv(tmp_path)
+    root = tmp_path / "データセット"
+    root.mkdir()
+    proc = run_fake_start_ps1(fake, b"\xef\xbb\xbf" + (str(root) + "\r\n").encode("utf-8"))
+
+    assert_started_with_the_root(proc)
+
+
+@needs_powershell
+def test_start_ps1_passes_the_root_from_roots_txt_verbatim(tmp_path: Path) -> None:
+    """The value in argv is the line from roots.txt, character for character.
+
+    An **ASCII** name with a space, because that is what can be compared through a pipe on any console
+    code page (see the note above); this is the half the two non-ASCII criteria cannot check -- that
+    the root really came from the file.
+    """
+    fake = fake_repo_with_a_venv(tmp_path)
+    root = tmp_path / "dataset root"
+    root.mkdir()
+    proc = run_fake_start_ps1(fake, (str(root) + "\n").encode("utf-8"))
+
+    problems = roots_arg_problems(assert_started_with_the_root(proc), root)
+    assert not problems, "%s\nstdout:\n%s" % ("\n".join(problems), proc.stdout)
+    assert (fake / "roots.txt").read_bytes() == (str(root) + "\n").encode("utf-8"), \
+        "the criterion wrote the file it is reading, so this fixture is broken"
+
+
+@needs_powershell
+def test_start_ps1_asks_when_roots_txt_is_empty(tmp_path: Path) -> None:
+    """An empty roots.txt used to die before it could ask.
+
+    The truthiness test was `(Get-Content $RootsFile -Raw).Trim()`, and `Get-Content -Raw` returns
+    $null for an empty file -- so `.Trim()` raised "You cannot call a method on a null-valued
+    expression" and the prompt below it was unreachable. An empty roots.txt is not exotic: pressing
+    Enter at the first run's prompt, or clearing the file by hand, produces one.
+    """
+    fake = fake_repo_with_a_venv(tmp_path)
+    root = tmp_path / "typed-root"          # ASCII: it travels to the child through a pipe as well
+    root.mkdir()
+    proc = run_fake_start_ps1(fake, b"", stdin_text=str(root) + "\r\n")
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # The interactive branch legitimately talks to the user on stdout (Warn/Say/Ok are Write-Host),
+    # so only the DRY_RUN_ lines are handed to the machine-output parser.
+    machine = "\n".join(line for line in proc.stdout.splitlines() if line.startswith("DRY_RUN_"))
+    problems = roots_arg_problems(parse_dry_run(machine), root)
+    assert not problems, "%s\nstdout:\n%s" % ("\n".join(problems), proc.stdout)
+    assert (fake / "roots.txt").read_text(encoding="utf-8-sig").strip() == str(root), \
+        "the root was read but not remembered, so it is asked for on every start"
+
+
+@needs_powershell
+def test_start_ps1_without_a_console_stdin_says_why_it_cannot_start(tmp_path: Path) -> None:
+    """stdin closed (`start.bat < nul`, a scheduled task) with no root configured: an honest sentence, not a crash.
+
+    `Read-Host` returns $null there, and `.Trim()` on that was the second null-method crash on this path.
+    """
+    fake = fake_repo_with_a_venv(tmp_path)
+    proc = run_fake_start_ps1(fake, b"")
+    combined = flat_text(proc.stdout + proc.stderr)
+
+    assert proc.returncode != 0, "it started with no dataset root at all?\n%s" % combined
+    assert "Without a dataset root we cannot start" in combined, combined
+    assert "null-valued expression" not in combined, (
+        "a null-method crash is not an answer to `no root configured`:\n%s" % combined)
+
+
 # --------------------------------------------------------------------------- 4. setup_env.sh --dry-run
 @needs_bash
 def test_setup_env_dry_run_cuda_pins_pypi_and_the_gpu_variant() -> None:
@@ -641,6 +818,46 @@ def test_setup_env_ps1_dry_run_installs_nothing(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- 5. falsification: deliberately broken input must go red
+def test_roots_arg_gate_goes_red_on_a_mojibake_root(tmp_path: Path) -> None:
+    """Falsification for the two `start.ps1` roots.txt criteria: a wrongly decoded root really does fail.
+
+    Decoding those bytes with the ANSI code page is what `Get-Content` without -Encoding did under
+    PowerShell 5.1, and the result is a path that does not exist -- which is why the real run exited
+    non-zero with "do not exist" instead of starting. If this ever stops being true, the criteria
+    above are no longer proving anything.
+    """
+    root = tmp_path / "データセット"
+    root.mkdir()
+    mojibake = str(root).encode("utf-8").decode("gbk", "replace")
+    assert mojibake != str(root)
+    assert not Path(mojibake).exists(), "the mojibake path exists? then this falsification is void"
+
+    args = ("-m", "kohya_dataset_tagger", "--port", "3001")
+    broken = DryRun(python="C:/fake/.venv/Scripts/python.exe", port="3001",
+                    args=args + ("--roots", mojibake))
+    assert roots_arg_problems(broken, root), "a mojibake root passes the gate?"
+    good = DryRun(python="C:/fake/.venv/Scripts/python.exe", port="3001",
+                  args=args + ("--roots", str(root)))
+    assert not roots_arg_problems(good, root)
+
+
+def test_flat_text_finds_a_message_powershell_wrapped_mid_word(tmp_path: Path) -> None:
+    """The "does it still crash?" criterion reads a **wrapped** PowerShell error, which is how this trap works.
+
+    Measured 2026-10-01: searching the raw text for "null-valued expression" reported "not found" while
+    the console was showing exactly that, split across two lines -- a criterion that is green because
+    it cannot see the failure.
+    """
+    wrapped = "start.ps1 : You cannot call a method on a null-valued e\r\nxpression.\r\n"
+    assert "null-valued expression" not in wrapped, "the raw text hides the message"
+    assert "null-valued expression" in flat_text(wrapped)
+    # And it must not eat letters: an earlier version of this helper used `[ \\t]+`, i.e. it silently
+    # deleted every "t" ("No da ase roo configured ye") -- while the assertion above stayed green,
+    # because "null-valued expression" happens to contain no "t" at all.
+    sentence = "    Without a dataset root we cannot start\r\n"
+    assert "Without a dataset root we cannot start" in flat_text(sentence), flat_text(sentence)
+
+
 def test_line_ending_gate_goes_red_on_a_crlf_shell_script(tmp_path: Path) -> None:
     broken = tmp_path / "broken.sh"
     broken.write_bytes(b"#!/usr/bin/env bash\r\nset -euo pipefail\r\necho hi\r\n")

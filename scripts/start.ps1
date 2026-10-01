@@ -57,17 +57,31 @@ if (-not (Test-Path $VenvPy)) {
 }
 
 # ---------------------------------------------------------------- 2. dataset roots
+# roots.txt is read as UTF-8 **explicitly**, and that is not a detail. The server rewrites the file
+# whole and BOM-less (config._write_atomic: encoding="utf-8"), while this script runs under Windows
+# PowerShell 5.1, whose Get-Content defaults to the ANSI code page (936 on this machine):
+# `E:\Downloads\fanbox\ほうき星` came back as `銇汇亞銇嶆槦`, Test-Path reported "does not exist", and
+# start.bat refused to start with a message that was itself mojibake (measured 2026-10-01).
+# -Encoding UTF8 reads both shapes: no BOM (what the server writes) and the BOM that PowerShell 5.1's
+# own `Set-Content -Encoding UTF8` leaves behind on the first interactive run.
+$fileRoots = @()
+if (Test-Path $RootsFile) {
+    $fileRoots = @(Get-Content $RootsFile -Encoding UTF8) | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() }
+}
+
 if (-not $Roots -or $Roots.Count -eq 0) {
     if ($env:KOHYA_TAGGER_ROOTS) {
         $Roots = $env:KOHYA_TAGGER_ROOTS -split ';' | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() }
-    } elseif ((Test-Path $RootsFile) -and (Get-Content $RootsFile -Raw).Trim()) {
-        $Roots = (Get-Content $RootsFile) | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() }
+    } elseif ($fileRoots.Count -gt 0) {
+        $Roots = $fileRoots
     } else {
         Warn "No dataset root configured yet"
         Say  "    You can enter several, separated by semicolons or commas. For example:"
         Say  "    D:\datasets\my-lora"
         $line = Read-Host "    Dataset root"
-        if (-not $line.Trim()) { throw "Without a dataset root we cannot start" }
+        # Read-Host returns $null when stdin is not a console (`start.bat < nul`, a scheduled task),
+        # and `.Trim()` on that is a null-method crash instead of the message below.
+        if (-not $line -or -not $line.Trim()) { throw "Without a dataset root we cannot start" }
         $Roots = $line -split '[;,]' | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() }
         $Roots | Set-Content -Path $RootsFile -Encoding UTF8
         Ok "Remembered, written to $RootsFile (no need to enter it again next time; edit it to change)"

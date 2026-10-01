@@ -108,6 +108,21 @@ python -m pytest test/test_docs_index.py -q                      # documentation
   which is a different path from the engine's byte-level decoding, so you get "the check passes but the script will not run".
   Use `[System.Management.Automation.Language.Parser]::ParseFile()` instead (reads bytes, same path as execution),
   or simply run it. `test/test_ps1_encoding.py` guards both the BOM and parsability.
+- **A `.ps1` that reads a data file must pass an explicit `-Encoding`.** The same 5.1 default (ANSI, 936 here) applies to `Get-Content`,
+  and the files it reads are often written by the Python side as **UTF-8 without a BOM**: on 2026-10-01 `start.bat` refused to start
+  because `roots.txt`'s `E:\...\ほうき星` came back as `銇汇亞銇嶆槦` and `Test-Path` called the directory missing.
+  A BOM hides this completely - the launcher's own first run writes one, the server strips it - so the bug waits for the first
+  root added from the **UI**. It also hides from `pwsh` 7, whose default is UTF-8. Two lessons beyond the encoding:
+  a criterion is only real if it runs the script (`scripts/start.ps1` had none, and every fixture path was ASCII), and
+  `Get-Content -Raw` returns `$null` for an empty file, so `(... -Raw).Trim()` is a null-method crash - not an empty-file check.
+  See [changelog/launcher-roots-encoding](../../../.github/memory/changelog/launcher-roots-encoding.md).
+- **Never compare non-ASCII text that came back through PowerShell's stdout.** It encodes a *redirected*
+  stdout with the console code page: measured 2026-10-01 on one command line, code page 65001 -> UTF-8,
+  936 -> GBK, and **437** (a typical CI runner) -> `??????`, because the characters do not exist there.
+  A criterion that asserted `argv contains データセット` passed under the DSH harness (which sets UTF-8) and
+  would have been **red on an ordinary console while the launcher was fine**. Assert the code-page-independent
+  signal instead - a return code, an ASCII value, or the script's own verdict - and run the criterion under a
+  second code page (`chcp 936`/`chcp 437` in the same console) before believing it.
 - **A module-scoped fixture + global state = an execution-order bomb.** `core.paths`'s allowlist is global,
   and other cases in the acceptance suite call `paths.configure(...)`; once `api_client` was made module-scoped,
   it published the allowlist only the first time and never restored it after being overwritten - the full run failed while an isolated run passed.

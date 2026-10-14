@@ -523,8 +523,9 @@ def test_the_toolbar_reads_scope_separator_state_then_its_actions() -> None:
     """The row's order, exactly: scope | state ....... actions.
 
     The separator is between the scope and the state readout, and the action group sits behind the
-    spacer, pushed to the row's right end - refresh first (it re-fetches the listing the grid is
-    showing), then the three selection actions as one contiguous set.
+    spacer, pushed to the row's right end - the two actions that are about the listing itself first
+    (refresh re-fetches it, "open in file manager" hands it to the OS), then the three selection
+    actions as one contiguous set.
 
     The separator is not decoration for its own sake: 6px of gap between a checkbox label and a
     dim 12px readout reads as one run of text ("include subdirectories 1 selected"), and the two
@@ -534,7 +535,8 @@ def test_the_toolbar_reads_scope_separator_state_then_its_actions() -> None:
     identities = [toolbar_child(child) for child in children]
     assert identities == [
         "recursive-toggle", ".group-sep", "#selection-info", ".spacer",
-        "#btn-refresh", "#btn-select-all", "#btn-select-missing", "#btn-clear-selection",
+        "#btn-refresh", "#btn-open-folder",
+        "#btn-select-all", "#btn-select-missing", "#btn-clear-selection",
     ], "the gallery toolbar reads %s" % identities
 
 

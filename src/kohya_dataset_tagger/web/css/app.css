@@ -804,7 +804,107 @@ body.is-resizing { cursor: col-resize; user-select: none; }
    rename tags the user never touched. */
 .batch-scope { color: var(--text); }
 .batch-section { margin: 8px 0; }
-.batch-common-list { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow: auto; }
+/* A tag field's autocomplete wrapper (web/js/suggest.js) must be exactly as wide as the field
+   it drops from, so the shared `.suggest-wrap { flex: 1 1 auto }` is not wanted in a flex row
+   here - measured in headless Chrome before this rule: the add field was 160px wide inside a
+   271px wrapper, so its list would have dropped from a box wider than the input. Inside a
+   `.field` the wrapper is a block and fills the label, so the rule only bites in the row. */
+.batch-section .suggest-wrap { flex: 0 1 auto; min-width: 0; }
+/* The common-tag editor is also the manual order editor, so its rows are grouped in the containers
+   the order payload has (front / middle / back). One image in scope means one container - the middle
+   would be meaningless there, because that image's own order IS the answer - so the other two are
+   closed with `.is-single`. The scroll box is the whole group, not one container: three independent
+   scroll areas in a narrow column would hide the rows the user is dragging between. */
+/* One spacing for the whole editor, declared once: the gap between two rows, between a block of
+   additions and the rows it belongs to, and between the list and the permanent `+` below it are the
+   same 4px - the user's "the spacing between this new button and the list has to match the spacing
+   between the list items". A container is the
+   flex column that enforces it, so the three cannot drift apart the way a hard-coded margin would. */
+.batch-order { --batch-row-gap: 4px; display: flex; flex-direction: column; gap: var(--batch-row-gap); max-height: 40vh; overflow: auto; }
+/* The two drop targets share a row at the top, and the middle (which starts out holding every common
+   tag) sits below it - the layout the user asked for in their own words: "pull the front and the
+   end containers to the top, otherwise dragging is torture". Sticky, with the panel's own background,
+   so a long middle list scrolls underneath instead of taking the drop targets off screen mid-drag.
+   **Capped at half the editor's own 40vh** (20vh, scrolling inside): the same user's second sentence -
+   "if the top fills up with tags there is no room left below" - so a front container holding fifty tags cannot
+   eat the list you are dragging out of. **`flex: 0 0 auto` is load-bearing**: a flex item with
+   `overflow: auto` loses its automatic minimum size, so the default `flex-shrink: 1` let the
+   overflowing middle squash this row to **zero height** - the user's report ("the front and the end
+   containers are gone") was a screenshot with the middle full of rows and no top row at all. Both rows
+   now keep their content height and the group scrolls instead (see the sibling rule below). */
+.batch-order-top {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  max-height: 20vh;
+  overflow: auto;
+  background: var(--bg-panel);
+}
+/* The middle is the long list and must not be squeezed either - same reason as above. */
+.batch-order > .batch-bucket { flex: 0 0 auto; }
+/* With one image there is only the front container: the half-height cap would waste the other half of
+   the editor, and there is no second list to protect. */
+.batch-order.is-single .batch-order-top { max-height: none; }
+.batch-order-top .batch-bucket { flex: 1 1 0; min-width: 0; }
+.batch-order.is-single .batch-bucket[data-bucket="middle"],
+.batch-order.is-single .batch-bucket[data-bucket="back"] { display: none; }
+/* A visible border, not only the accent one a drop target gets: three unoutlined groups of rows read
+   as one flat list, and the point of the containers is that their contents mean different things. */
+.batch-bucket {
+  display: flex; flex-direction: column; gap: var(--batch-row-gap);
+  border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px;
+}
+.batch-bucket-title { font-size: 11px; color: var(--text-dim); }
+/* A list keeps its own height (`flex: 0 0 auto`). Without it an explicit `min-height` is also the floor a
+   flex item may be shrunk *to*, so a tall list was squashed to that floor with its rows overflowing it
+   invisibly; the pinned row's own `overflow: auto` is what scrolls instead. */
+.batch-bucket-rows, .batch-bucket-added { flex: 0 0 auto; }
+.batch-bucket-rows { display: flex; flex-direction: column; gap: var(--batch-row-gap); }
+/* An empty list is **not a block**: it used to keep a 22px floor "so an empty container is droppable",
+   which put a hole between the `+` and whatever was above it (the screenshot: an addition row, then
+   ~30px of nothing, then the `+`). The container itself is the drop target - it has the border, the
+   highlight and the `+` - so the empty list takes no space at all. */
+.batch-bucket-rows:empty { display: none; }
+/* The permanent add row of a container: **one full-width dashed `+`**, always there. Clicking it
+   appends a new element to the container - an addition row, painted with the same shape as a tag row -
+   and an element left empty and blurred removes itself again, so this row never becomes a box itself.
+   It carries no margin of its own: the container's `gap` spaces it like every other row. */
+.batch-bucket-add {
+  flex: 1 1 auto; width: 100%; min-width: 0;
+  /* The same box a tag row's input has (28px measured in Chrome over the real app.css), so the +
+     lines up with the rows above it instead of sitting on a slightly shorter line. */
+  min-height: 28px;
+  background: transparent; color: var(--text-dim);
+  border: 1px dashed var(--line); border-radius: 4px;
+  padding: 3px 6px; font-size: 13px; line-height: 1.2; cursor: pointer;
+}
+.batch-bucket-add:hover { color: var(--text); border-color: var(--accent); background: var(--bg-elev); }
+.batch-bucket-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The additions of a block: rows, not chips (the user asked for "a new element"), spaced like rows. */
+.batch-bucket-added { display: flex; flex-direction: column; gap: var(--batch-row-gap); }
+.batch-bucket-added:empty { display: none; }
+/* The container the pointer is over while dragging: the whole container is the drop target, and an
+   empty front/back container has to be visibly droppable. */
+.batch-bucket.is-drop-target { border-color: var(--accent); background: var(--accent-dim); }
+.batch-common-row.is-dragging { opacity: .5; }
+.batch-grip {
+  flex: 0 0 auto;
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  padding: 3px 3px 3px 4px;
+  border-radius: 3px;
+  user-select: none;
+}
+/* A handle nobody notices is a handle nobody uses - the report that started this was "where is the
+   entrance?", so the row says what it is on hover, not only in the tooltip. */
+.batch-grip:hover { color: var(--text); background: var(--bg-elev); }
+.batch-grip:active { cursor: grabbing; }
+.batch-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .batch-common-row { display: flex; gap: 4px; align-items: center; }
 .batch-common-input {
   flex: 1 1 auto; min-width: 0;
@@ -1037,6 +1137,21 @@ body.is-resizing { cursor: col-resize; user-select: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The current location, right above the listing it names. It wraps instead of
+   scrolling - the point of the row is that the end of a long path is readable,
+   which is exactly what the one-line editable field above cannot promise. */
+.picker-location-row { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 4px; }
+.picker-location-label { flex: 0 0 auto; }
+.picker-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; }
+.picker-crumb {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The directory itself, the last segment: text, not a control - clicking where
+   you already are is a no-op that would look like an action. */
+.picker-crumb.is-current { font-weight: 600; color: var(--text); }
 .picker-list {
   max-height: 46vh;
   overflow: auto;

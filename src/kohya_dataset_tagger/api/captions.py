@@ -108,7 +108,9 @@ class CaptionBatchRequest(BaseModel):
     (falling back to `find` / `replace` when absent);
     `append` / `prepend` / `remove` use `tags`;
     `edit_tags` uses `pairs` (group rename, empty string deletes) + `tags` (additions) +
-    `position` (`append` / `prepend`, appending at the end by default);
+    `position` (`append` / `prepend`, appending at the end by default) +
+    `tags_first` / `tags_last` (additions that land **inside** the order blocks, added 2026-10-13) +
+    `order_first` / `order_last` (move those tags to the front / the end, in that order; added 2026-10-13);
     `normalize` / `sort_danbooru` need no extra parameters.
 
     With `dry_run=true` it writes **not a single byte**: it returns `changed` and `before` / `after` per image,
@@ -131,6 +133,18 @@ class CaptionBatchRequest(BaseModel):
     tags: list[str] | None = None
     pairs: list[TagEditPair] | None = None
     position: str | None = None
+    #: `edit_tags` additions that belong to one of the two order blocks (added 2026-10-13): the panel's
+    #: front and end containers each have their own "add" row, and a new tag has to land in the block
+    #: the user put it in. `tags` + `position` above can only say "the very front" or "the very end" -
+    #: one answer per request - so two additions on opposite ends need these two lists.
+    tags_first: list[str] | None = None
+    tags_last: list[str] | None = None
+    #: `edit_tags` order blocks (added 2026-10-13, §4.5 ③): `order_first` moves those tags to the
+    #: front in that order, `order_last` moves those to the end; everything else keeps its own
+    #: relative order between the two. A tag no caption carries is skipped, and the block a tag is
+    #: not listed in is never touched at all - the manual reorder only ever sends what the user moved.
+    order_first: list[str] | None = None
+    order_last: list[str] | None = None
     ignore_case: bool = False
     dry_run: bool = False
     backup: bool = True
@@ -326,8 +340,45 @@ def _with_added_tags(
     return fresh + tags if at_front else tags + fresh
 
 
+def _order_entries(raw: list[str] | None) -> list[str]:
+    """One order block, cleaned: stripped, empties dropped, each tag kept once (first occurrence wins)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _apply_tag_order(tags: list[str], payload: CaptionBatchRequest) -> list[str]:
+    """`order_first` / `order_last`: move those tags to the front / the end, in that order (§4.5 ③).
+
+    Everything else keeps its **own relative order** between the two blocks. A tag no caption carries
+    is skipped rather than invented: the frontend sends the tags the user moved, and a tag may have
+    been renamed or deleted by `pairs` in the same request.
+
+    The block a tag is **not** listed in is never touched - that is the whole point of the frontend's
+    "middle" container (it means "leave these where they are", so it is not sent at all). A tag listed
+    in both blocks counts as front.
+    """
+    first = _order_entries(payload.order_first)
+    last = _order_entries(payload.order_last)
+    if not first and not last:
+        return tags
+    present = set(tags)
+    head = [tag for tag in first if tag in present]
+    head_set = set(head)
+    tail = [tag for tag in last if tag in present and tag not in head_set]
+    tail_set = set(tail)
+    middle = [tag for tag in tags if tag not in head_set and tag not in tail_set]
+    return head + middle + tail
+
+
 def _apply_edit_tags(tags: list[str], payload: CaptionBatchRequest) -> list[str]:
-    """`edit_tags`: rename/delete by `pairs`, then add `tags` at the end or the start.
+    """`edit_tags`: rename/delete by `pairs`, move by `order_first`/`order_last`, then add `tags`.
 
     Renaming is a **single mapping**: the first matching pair wins, no chaining (when a->b and b->c are both given,
     a tag that was originally a only becomes b and is not further changed to c). Chaining would make a combination like
@@ -335,11 +386,30 @@ def _apply_edit_tags(tags: list[str], payload: CaptionBatchRequest) -> list[str]
 
     An empty or all-whitespace `replace` = delete this tag (consistent with dataset-tag-editor's "change to blank means delete").
     Slots are not compacted: deleting the 3rd common tag does not affect the 4th, so there is no "misaligned rename".
+
+    **Order runs before the additions on purpose** (2026-10-13): the added tags' own `position`
+    control promises "the very front / the very end", so an addition must land outside the order
+    blocks - otherwise a reorder would quietly push a freshly prepended tag back into the middle.
+
+    `tags_first` / `tags_last` are the **block additions** the panel sends (its front and end
+    containers each have their own "add" row): they are added when the caption lacks them and placed
+    at the outermost ends, i.e. `tags_first + (the order blocks) + tags_last`. A tag already present
+    is left where it is - moving it is what `order_first` / `order_last` are for, and the panel sends
+    both when a block carries a newly typed tag.
     """
     pairs = payload.pairs or []
     added = [str(tag) for tag in (payload.tags or []) if str(tag)]
-    if not pairs and not added:
-        raise BatchOpError("op=edit_tags needs pairs or tags")
+    added_first = _order_entries(payload.tags_first)
+    added_last = _order_entries(payload.tags_last)
+    if (
+        not pairs
+        and not added
+        and not added_first
+        and not added_last
+        and not payload.order_first
+        and not payload.order_last
+    ):
+        raise BatchOpError("op=edit_tags needs pairs, tags or an order")
     position = (payload.position or "append").strip().lower()
     if position not in BATCH_POSITIONS:
         raise BatchOpError("op=edit_tags position must be one of %s" % list(BATCH_POSITIONS))
@@ -361,9 +431,16 @@ def _apply_edit_tags(tags: list[str], payload: CaptionBatchRequest) -> list[str]
         cleaned = replacement.strip()
         if cleaned:
             out.append(cleaned)
+    out = _apply_tag_order(out, payload)
     present = set(out)
     fresh = [tag for tag in added if tag not in present]
-    return fresh + out if position == "prepend" else out + fresh
+    # The block additions are the **outer end of their own block**: "add to the front container" means
+    # the very first tag, before everything the user moved there. The legacy `tags` + `position` stay
+    # outside even those - that control's own promise is "the very front / the very end".
+    head = [tag for tag in added_first if tag not in present and tag not in fresh]
+    tail = [tag for tag in added_last if tag not in present and tag not in fresh and tag not in head]
+    core = head + out + tail
+    return fresh + core if position == "prepend" else core + fresh
 
 
 def _apply_batch_op(

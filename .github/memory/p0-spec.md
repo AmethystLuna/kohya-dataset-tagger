@@ -39,6 +39,7 @@ metadata:
 | §4.14 | Dataset image scaling/export (area normalization into a target directory, background job + SSE) |
 | §4.15-§4.16 | Scroll memory for directory navigation; the dataset root's `dataset.toml` as a read-only fact |
 | **§4.17** | **Image cropping**: `POST /api/crop/apply` - crop one image, archive it beside the source (`_1`/`_2`…), the per-image confirmation dialog and its inheritance rules - requirement added 2026-09-20 |
+| **§4.18** | **Opening a directory in the OS file manager**: `POST /api/fs/reveal` - the gallery's own button, the allowlist stays the door - requirement added 2026-10-13 |
 | **§5** | **Acceptance criteria A1-A32** (run `acceptance/`) |
 | §6 | Division of labor and file ownership (for avoiding conflicts in parallel workflows; skippable when one person edits the code) |
 | §7 | Environment, GPU (DirectML by default), benchmark methodology, out-of-band lessons |
@@ -191,6 +192,7 @@ path**, never just the filename.
     │   ├── fs.py                           # A   directory browsing + statistics
     │   ├── roots.py                        # D   ★ §4.11 runtime-editable allowlist
     │   ├── pick.py                         # D   §4.12 graphical directory picker (list dirs only + create dir, loopback gate)
+    │   ├── reveal.py                       # D   §4.18 show an allowlisted directory in the OS file manager
     │   ├── images.py                       # A   thumbnails / metadata
     │   ├── captions.py                     # D
     │   ├── tags.py                         # D
@@ -231,6 +233,9 @@ path**, never just the filename.
 > instance from `tags.js`).
 > **Added again on 2026-09-19**: `api/scale.py` / `core/scaler.py` / `web/js/scale.js` /
 > `web/js/trainparams.js` (§4.14 image scale/export, ported from the standalone `image_scaler_gui.py`).
+> **Added again on 2026-10-13**: `api/reveal.py` (§4.18 open the directory on screen in the OS file
+> manager). It is a separate module from `api/pick.py` for the opposite reason: the picker ignores the
+> allowlist by design, this one goes through it.
 
 ---
 
@@ -583,6 +588,7 @@ truth is already the structured fields.
 | GET | `/fs/list` | `?path=&recursive=` | `{path, parent, dirs:[{name,path,image_count,preview_images}], images:[{name,path,size,mtime}], counts:{images,dirs,captions,missing_captions}}` (`preview_images` added in §4.13) |
 | GET | `/fs/pick` | `?path=` | `{path, parent, dirs:[{name,path}], roots:[str], home}`, **lists directories only**, see §4.12 |
 | POST | `/fs/pick/mkdir` | `{parent, name}` | 200 `{path, created}`; creates one level only, idempotent for an existing directory (`created:false`), 409 `already_exists` for an existing file, see §4.12 |
+| POST | `/fs/reveal` | `{path}` | 200 `{path, launcher}` - show a directory **inside the allowlist** in the OS file manager; adds no authority the listing does not already grant, see §4.18 |
 | GET | `/images/thumb` | `?path=&size=grid|preview` | WebP bytes |
 | GET | `/images/meta` | `?path=` | `{path,width,height,display_width,display_height,bytes,mtime,mode,has_alpha}` (`display_*` added in §4.17: the size **as shown**, EXIF orientation applied) |
 | GET | `/captions` | `?path=` | `{image,caption_path,exists,text,tags,multiline_warning}` |
@@ -771,7 +777,7 @@ suite where nothing is).
 | `regex_replace_text` | `pattern`, `replacement`, `ignore_case` (replace **across the whole text**, result re-split on bare commas) |
 | `append` / `prepend` | `tags` (order-preserving, skips ones already present) |
 | `remove` | `tags` |
-| `edit_tags` | `pairs:[{find,replace}]` (empty `replace` string = delete) + `tags` (additions) + `position` (`append`/`prepend`) + `ignore_case` |
+| `edit_tags` | `pairs:[{find,replace}]` (empty `replace` string = delete) + `tags` (additions) + `position` (`append`/`prepend`) + `tags_first`/`tags_last` (**additions into the front / end block**, added 2026-10-13) + `order_first`/`order_last` (**move those tags to the front / the end**, in that order - added 2026-10-13) + `ignore_case` |
 | `normalize` / `sort_danbooru` | — |
 
 The last three were filled in on 2026-09-18 when wiring up the frontend batch panel (`regex_replace_text`
@@ -779,6 +785,50 @@ The last three were filled in on 2026-09-18 when wiring up the frontend batch pa
 no chaining (given both `a→b` and `b→c`, the original `a` becomes only `b`). Chaining would let "rename
 then rename again" quietly touch a batch of extra images with no visible sign in the UI. Rows are **not
 compressed** either: deleting one tag does not shift and rename the tags after it.
+
+**The manual order (added 2026-10-13, asked for by the user: "reorder the scope's common tags by hand")**
+is the same op, with two more fields:
+
+    {"op": "edit_tags", "order_first": ["girl", "smile"], "order_last": ["hat"], ...}
+
+- `order_first` / `order_last` are two **blocks**: the listed tags are placed at the front / at the end
+  **in the order they are listed**, and every tag in neither block keeps its **own relative order**
+  between the two;
+- a tag no caption carries is **skipped**, never invented (the frontend sends tags the user moved, which
+  `pairs` may have renamed in the same request), a duplicate entry counts **once**, and a tag listed in
+  both blocks counts as **front**;
+- **application order inside `edit_tags` is `pairs` → order → `tags`**, deliberately: the addition's own
+  `position` promises "the very front / the very end", so an addition has to land **outside** the order
+  blocks - ordering after the additions would silently pull a freshly prepended tag back into the middle;
+- **the middle of the frontend's three containers is never sent**, and that is the whole reason the
+  shape is two blocks rather than one order: a batch is a set of captions that do **not** share one
+  order, so listing every common tag would impose the first caption's sequence on all of them - a change
+  the user never asked for and cannot see in the containers. The frontend's middle container means
+  "leave these where they are", in each caption's own order;
+- **`tags_first` / `tags_last` are additions that belong to one of the two blocks** (added later the
+  same day): each is added when the caption lacks it and lands at the **outer end of its own block** -
+  before everything `order_first` moved, and after everything `order_last` moved - which is also where
+  the panel draws it (the front container's chips sit above its rows, the end container's below them).
+  A tag the caption already carries is left alone (moving it is `order_*`'s job, and the panel sends
+  both when a row for it exists). `tags` + `position` keep their own, outermost promise;
+- with **one image** in scope the frontend puts every row in the front block (that container *is* the
+  caption's order), so "drag the rows into the order you want" is one list, not a rule to learn;
+- an `edit_tags` request whose parameters are all empty is still 400 `bad_request`
+  (`needs pairs, tags or an order`).
+
+**The panel's op list shrank the same day** (the user: "追加/前置/移除 tag 三个功能已经被这一个给替代了吧"):
+`api.js`'s `BATCH_OP` no longer names `append` / `prepend` / `remove`, because the common-tag editor
+covers all three - its two container add rows add a tag at either end, clearing a row deletes a tag, and
+`replace` with an empty replacement removes a tag that is **not** common. The three ops **stay in the
+endpoint's `BATCH_OPS`** as its primitive set (nothing else in the page sends them), so
+`test_web_batch.py`'s parity criterion is now **one-directional**: every op the frontend names must exist
+in the backend (the failure it exists for - a 400 `bad_op` after the user has already clicked write) and
+the backend-only primitives are recognised by name in the same criterion.
+
+Acceptance **A46** scores the block rules over two real files whose captions are ordered differently -
+the front and end blocks land identically on both, the middle keeps each caption's own sequence, the
+block additions land at the outer end of their own block without duplicating a tag that is already
+there, and the preview's `after` is byte-for-byte the file the write produces.
 
 **`dry_run: true` (added 2026-09-18, for "take a look before applying")**: writes not a single byte and
 touches no cache, returning `changed` / `before` / `after` per image; here `applied` means "how many would
@@ -1379,6 +1429,18 @@ When `--host` is **not a loopback address**, the following six all return 403:
 - New module: a modal = **an editable current-path box** + quick jumps (drives / home) + **a create-directory
   row** + a one-level directory list + "up / use this directory / cancel"; Esc, the overlay and Cancel all
   close it;
+- **Current location** (2026-10-13, asked for by the user: "when jumping around, an empty directory leaves
+  you with no idea where you are"): a breadcrumb row sits directly above the listing it names - the label
+  `picker.location` and then one segment per ancestor, root first, **the directory itself last and not
+  clickable** (`aria-current`, plain text). Every segment above it is a button that navigates there, so
+  several levels up is one click instead of a walk. It is deliberately **not** the same thing as the path
+  box: the box is a control whose value "use this directory" resolves, and a one-line input shows its
+  beginning and hides its end - which is exactly the part that says which directory this is, and exactly
+  what an empty listing leaves the user with;
+- **The picker is relabelled on a language switch** (2026-10-13): its copy is all construction-time, so
+  `picker.relabel()` re-paints the dialog (and the listing's own row tooltips) and `app.js` registers it
+  with `relabelComponent(picker)`. Before this, the whole dialog stayed in the language it was built in
+  until the next page load;
 - **Manual entry** (2026-09-19): type an absolute path in the box and press Enter to go there
   (`GET /api/fs/pick`); "use this directory" also respects the box's value - typing something and not
   pressing Enter should not be silently ignored. Enter inside the input belongs to the input and does not
@@ -1835,6 +1897,49 @@ directory), so there is no second user-supplied path and no loopback gate.
   the snapping rather than from the pixels on screen. A full-resolution viewer is what the zoom surface is for,
   and it is not wired into the dialog.
 
+### 4.18 Opening a Directory in the OS File Manager (requirement added 2026-10-13)
+
+**The problem to solve**: everything this app does happens inside the page, and a browser cannot open a
+folder. The user asked for it in their own words ("add a button in the gallery area that opens the folder in
+File Explorer"), and the reason is the ordinary one: after looking at a caption here, the next thing is
+often on the desktop - drop a file in, compare two folders, see what the trainer wrote - and the only route
+was to read the path off the screen and navigate there by hand.
+
+#### POST /api/fs/reveal
+
+    {"path": str}                      (empty = the first allowlist root)
+    → 200 {"path": str, "launcher": str}
+
+- **The allowlist applies.** The path goes through `core/paths.py` like every other one, so the endpoint
+  grants no authority that reading the listing or writing a caption beside it does not already grant:
+  403 `outside_roots` / 404 `not_found` / 400 `not_a_directory`;
+- **It is therefore *not* behind §4.11's loopback gate**, and that is a decision, not an omission: the gate
+  exists for the endpoints that **widen** the allowlist (`POST /api/roots`, `GET /api/fs/pick`, `mkdir`),
+  and this one cannot widen anything. The honest consequence is written down rather than implied: with
+  `--host` on an external address, a remote caller can make a file manager window appear on this machine's
+  desktop. That is a nuisance, not an escalation - the same caller can already rewrite the captions in that
+  directory - and it stays inside the allowlist;
+- **POST, not GET**: it starts a process on the server's machine, and a GET has to stay safe to retry, to
+  prefetch and to sit in a cache;
+- `launcher` is what was started - `explorer.exe` on Windows, `open` on macOS, `xdg-open` elsewhere. The
+  process is **not waited for** (`explorer.exe` exits 1 even when it worked, so its return code is not a
+  success signal) and its stdio is discarded; there is no shell, so the path is never re-interpreted;
+- a machine with no launcher at all (a headless server) answers 500 `no_file_manager` with the path in
+  `params`, and nothing else about the app changes.
+
+#### Frontend landing spot
+
+- One button, `#btn-open-folder` (`gallery.openFolder`), on the grid's own toolbar next to refresh: both act
+  on the listing itself - one re-reads it, the other opens it - and neither acts on the selection, which is
+  the contiguous set after them (`test_web_filter.py` pins that order);
+- **greyed out while no directory is open**, painted in `renderBreadcrumb()` where `#btn-parent` already is
+  (§4.18's action is about the directory on screen, and that is the one function that runs on every
+  navigation);
+- a failure is **reported, never swallowed**: a headless server has no launcher, and a button that appears
+  to do nothing is worse than a sentence (`gallery.openFolderFailed` with `{message}`);
+- it is also a command-palette entry (`browse.openFolder`), calling the same `openInFileManager()` the button
+  calls - the "no privileged path" rule, and the palette's own criterion checks the wiring.
+
 ## 5. Acceptance Criteria
 
 Each one must be an **executable criterion**, not "looks right". The spec gives the criterion, the
@@ -1883,6 +1988,8 @@ measurement gives the result.
 | **A44** | **Image cropping (§4.17)**: `POST /api/crop/apply` writes the rectangle's window **beside the source** as `<stem>_<n><ext>` - `_1`, then `_2`, stepping over a file the user made and **never overwriting it**, leaving the source's bytes, size and mtime untouched and no `.tmp-scale-*` behind; a box that sticks out of the frame is **clamped and reported** (`crop` vs `crop_requested` + a `warnings` entry), not rejected; `format:"keep"` keeps a `.jpeg` source a `.jpeg` archive; **no caption is inherited**; the rectangle is in **display coordinates** (an EXIF orientation-6 photo is cropped the way it is shown); with the scaling half, a box whose area already equals `target_width x target_height` comes out at `scale == 1.0` with `resampled == false`; a source outside the allowlist is 403 and creates nothing. The frontend fixture `crop_harness.mjs` really runs `crop.js` + `cropbox.js` (the confirmed rectangle reaches the request, the box is carried over between images, a locked ratio survives a drag, a failed write stays on the same image, and the tagger step calls the existing `/api/autotag/run` with the Tagger tab's settings) | me |
 | **A43** | **The dataset root's `dataset.toml` is a read-only fact (§4.16)**: `GET /api/dataset/toml/status?root=` answers `exists:false` before the file is there and `exists:true` **with that file's real mtime and size** afterwards, at `<root>/dataset.toml`; a nested subdirectory answers about its own file, not the dataset's; an out-of-bounds root is 403. **Read-only, scored by fingerprinting the whole directory around every call**: no file is created (asking about a root without a toml does not create one), no mtime moves, no `.bak` appears, and no byte of the directory changes - the endpoint writes nothing. **The strip does not guess**: an independent node probe over the real `readiness.js` shows a failed request painting `readiness.tomlUnread` (never the "not generated" claim), and a **clean export report with no file on disk painting 未生成, not 就绪** - the report describes a plan, the endpoint describes the file, and the plan may not stand in for it | me |
 | **A37** | **Backend messages are localizable (§4.9 supplement 4)**: the `warnings` / `skipped` of `POST /api/dataset/toml` are unchanged, while `warning_items` / `skipped_items` are supplied item-for-item in the same order and length with `text` / `reason` **byte-for-byte identical** to the old arrays; each code's `params` match the frozen table; the error shape gains `params`, and `outside_roots` / `not_found` / `not_a_directory` carry `{"path": ...}`; the frontend uses the translation when `hasKey("msg."+code)` hits and the placeholders are fully filled, otherwise it **displays the backend's original text verbatim** (falsification: change `text` or delete a `msg.*` key and it turns red) | me |
+| **A45** | **Opening a directory in the OS file manager (§4.18)**: `POST /api/fs/reveal` really starts the platform's launcher **for the resolved directory inside the allowlist** and answers `{path, launcher}`; a directory **outside** the allowlist is 403 `outside_roots` **and the launcher is not called at all** (the assertion covers the negative: a refused request must not open a window); a file is 400 `not_a_directory`; a missing path is 404; a machine without a launcher is 500 `no_file_manager` with the path in `params`, not a silent 200. The frontend half is the same shape as every other surface: `#btn-open-folder` sits on the grid's own toolbar next to refresh (pinned by `test_web_filter.py`), is greyed out while no directory is open, calls `api.revealDir(state.dir)`, reports a failure with `gallery.openFolderFailed` instead of swallowing it, and the palette's `browse.openFolder` entry runs the very same `openInFileManager()` the button's listener does. The picker's **current-location breadcrumb** (§4.12) is scored here too: `picker_harness.mjs` really runs `picker.js` and asserts the segments read root → … → the directory itself, that the last segment is not a button, and that clicking an ancestor navigates there | me |
+| **A46** | **The manual reorder (§4.5 ③)**: `edit_tags`' `order_first` / `order_last` place those tags at the front / at the end **in the listed order**, and every other tag keeps its own relative order between them - scored on two real captions that are ordered **differently**, so the same two blocks land on both while the middle keeps each caption's own sequence (one block order for a batch is exactly what this shape exists to avoid). A tag no caption carries is skipped, a duplicate counts once, `tags_first` / `tags_last` add a **new** tag at the outer end of its own block (and do nothing when the captions already carry it), an addition's own `position` stays **outside** the blocks (`head` reaches the very front), an order that changes nothing is `changed: false`, and the preview's `after` is **byte-for-byte** the file the real write produces while `dry_run` leaves both files untouched. The frontend half: with one image in scope the single container holds that caption's own order (not the alphabetical intersection) and the whole list is sent; with several, everything starts in the middle, a move inside the middle changes nothing and is never sent, the front/end blocks are what the request carries, and each of those two containers has its own permanent add row whose tag reaches the request as `tags_first` / `tags_last` (`batch_harness.mjs`, run by `test_web_batch.py`) | me |
 
 ---
 

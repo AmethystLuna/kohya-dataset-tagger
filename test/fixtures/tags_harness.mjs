@@ -67,7 +67,20 @@ class FakeNode {
   focus() { globalThis.document.activeElement = this; }
   addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); }
   removeEventListener(type, handler) { this.listeners[type] = (this.listeners[type] || []).filter((item) => item !== handler); }
-  fire(type, event) { for (const handler of [...(this.listeners[type] || [])]) handler(event || { preventDefault() {} }); }
+  /**
+   * The event carries a real `preventDefault()`: the dropdown and the input's own
+   * Enter handler share one keypress, and they agree through `defaultPrevented`.
+   */
+  fire(type, event) {
+    const payload = Object.assign(
+      {
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      },
+      event || {},
+    );
+    for (const handler of [...(this.listeners[type] || [])]) handler(payload);
+  }
 }
 
 const body = new FakeNode("body");
@@ -122,6 +135,9 @@ apiMod.api.putCaption = async (payload) => {
 };
 
 const errors = [];
+//: What the editor told the user: a shared Enter that both the dropdown and the
+//: input act on shows up here as the empty-tag warning of section 6.
+const notices = [];
 const nodes = {
   chips: el("div", "chips"),
   input: el("input"),
@@ -143,7 +159,7 @@ const editor = tagsMod.createTagEditor(Object.assign({}, nodes, {
   },
   onSaved: () => {},
   onError: (message) => errors.push(message),
-  onNotify: () => {},
+  onNotify: (message, kind) => notices.push({ message, kind }),
 }));
 
 await editor.load("/a/one.png");
@@ -207,5 +223,30 @@ nodes.rawToggle.fire("change");
 await tick();
 assert(confirmCalls.length === 0, "blank trailing lines must not trigger a confirmation");
 assert(JSON.stringify(editor.getTags()) === JSON.stringify(["1girl", "solo"]), "blank lines must not become tags");
+
+// ---- 6. a suggestion is taken once, not once per listener ----------------
+// Enter has two meanings on this input: the dropdown reads it as "take the
+// highlighted tag", the input as "add what I typed". The dropdown marks the event
+// it handled and the host's listener stands down on that mark; without it the
+// accepted tag is added and then the same Enter adds nothing, which the user sees
+// as an "empty tag" warning. The dropdown itself is web/js/suggest.js, shared with
+// the batch panel - this is the half that only the editor can prove.
+await editor.load("/a/one.png");
+notices.length = 0;
+apiMod.api.tagAutocomplete = async () => ({
+  suggestions: [{ tag: "1girl_alt", category: "General", category_id: "0", count: 7 }],
+});
+nodes.input.value = "1girl_al";
+nodes.input.fire("input");
+await new Promise((resolve) => setTimeout(resolve, 250));
+assert(nodes.suggest.hidden === false, "typing a tag did not open the dropdown");
+assert(nodes.suggest.children.length === 1, "expected one suggestion, got " + nodes.suggest.children.length);
+nodes.input.fire("keydown", { key: "Enter" });
+await tick();
+const taken = editor.getTags().filter((tag) => tag === "1girl_alt");
+assert(taken.length === 1, "Enter did not take the suggestion exactly once: " + JSON.stringify(editor.getTags()));
+assert(notices.length === 0, "the same Enter was read twice: " + JSON.stringify(notices));
+assert(nodes.input.value === "", "the input kept the fragment after the tag was taken");
+assert(nodes.suggest.hidden === true, "the dropdown stayed open after a suggestion was taken");
 
 console.log("tags harness OK");

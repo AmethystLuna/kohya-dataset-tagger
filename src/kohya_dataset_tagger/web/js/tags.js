@@ -8,10 +8,8 @@
  */
 
 import { api } from "./api.js";
+import { createSuggest } from "./suggest.js";
 import { t } from "./strings.js";
-
-const SUGGEST_LIMIT = 8;
-const SUGGEST_DEBOUNCE_MS = 150;
 
 function joinTags(list) {
   return list.join(", ");
@@ -256,115 +254,36 @@ export function createTagEditor(options) {
   });
 
   // ---- autocomplete ------------------------------------------------------
-  let suggestTimer = null;
-  let suggestIndex = -1;
-  let suggestItems = [];
-
-  function closeSuggest() {
-    suggestEl.hidden = true;
-    suggestEl.replaceChildren();
-    suggestItems = [];
-    suggestIndex = -1;
-  }
-
-  function paintSuggest() {
-    suggestEl.replaceChildren();
-    suggestItems.forEach((item, index) => {
-      const row = document.createElement("div");
-      row.className = "suggest-item" + (index === suggestIndex ? " is-active" : "");
-      const name = document.createElement("span");
-      name.textContent = item.tag;
-      const cat = document.createElement("span");
-      cat.className = "s-cat";
-      // Section 4.5: category is the human readable name ("General") and
-      // category_id the numeric code ("0"); fall back to the id so an older
-      // backend still renders something instead of an empty badge.
-      const parts = [];
-      if (item.category !== undefined && item.category !== null && item.category !== "") {
-        parts.push(String(item.category));
-      } else if (item.category_id !== undefined && item.category_id !== null) {
-        parts.push(String(item.category_id));
-      }
-      if (item.count !== undefined && item.count !== null) parts.push(String(item.count));
-      cat.textContent = parts.join(" \u00b7 ");
-      row.append(name, cat);
-      row.dataset.index = String(index);
-      suggestEl.append(row);
-    });
-    suggestEl.hidden = suggestItems.length === 0;
-  }
-
-  function acceptSuggest(index) {
-    const item = suggestItems[index];
-    if (!item) return;
-    addTag(item.tag);
-    closeSuggest();
-    inputEl.focus();
-  }
-
-  suggestEl.addEventListener("mousedown", (event) => {
-    // keep focus in the input so the blur handler does not commit the query
-    event.preventDefault();
-    const row = event.target.closest(".suggest-item");
-    if (row) acceptSuggest(Number(row.dataset.index));
-  });
-
-  async function refreshSuggest() {
-    const query = inputEl.value.trim();
-    if (!query || currentPath === null) { closeSuggest(); return; }
-    try {
-      const payload = await api.tagAutocomplete(query, SUGGEST_LIMIT);
-      const list = (payload && payload.suggestions) || [];
-      suggestItems = list.filter((item) => tags.indexOf(item.tag) < 0);
-      suggestIndex = suggestItems.length > 0 ? 0 : -1;
-      paintSuggest();
-    } catch (err) {
-      closeSuggest();
-    }
-  }
-
-  inputEl.addEventListener("input", () => {
-    if (suggestTimer) window.clearTimeout(suggestTimer);
-    suggestTimer = window.setTimeout(refreshSuggest, SUGGEST_DEBOUNCE_MS);
+  // The dropdown itself is web/js/suggest.js; the batch panel serves its own tag
+  // fields from the same module, so the two surfaces cannot drift apart.
+  const suggest = createSuggest({
+    input: inputEl,
+    list: suggestEl,
+    // No active image means no editor, so no request either.
+    source: async (query, limit) => {
+      if (currentPath === null) return [];
+      const payload = await api.tagAutocomplete(query, limit);
+      return (payload && payload.suggestions) || [];
+    },
+    // A tag this image already has is not a suggestion: adding it again is refused.
+    exclude: () => tags,
+    onAccept: (tag) => addTag(tag),
   });
 
   inputEl.addEventListener("keydown", (event) => {
-    if (!suggestEl.hidden && suggestItems.length > 0) {
-      if (event.key === "ArrowDown") {
-        suggestIndex = (suggestIndex + 1) % suggestItems.length;
-        paintSuggest();
-        event.preventDefault();
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        suggestIndex = (suggestIndex - 1 + suggestItems.length) % suggestItems.length;
-        paintSuggest();
-        event.preventDefault();
-        return;
-      }
-      if (event.key === "Tab") {
-        acceptSuggest(suggestIndex);
-        event.preventDefault();
-        return;
-      }
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      if (!suggestEl.hidden && suggestIndex >= 0) {
-        acceptSuggest(suggestIndex);
-        return;
-      }
-      addTag(inputEl.value);
-      closeSuggest();
-    } else if (event.key === "Escape") {
-      closeSuggest();
-    }
+    // The dropdown owns the arrows, Tab, Escape and the Enter that takes its
+    // active row, and marks them handled; only an unhandled Enter adds what was
+    // typed here - two handlers acting on one Enter would add it twice.
+    if (event.defaultPrevented || event.key !== "Enter") return;
+    event.preventDefault();
+    addTag(inputEl.value);
+    suggest.close();
   });
 
   // Autosave on blur: the requirement is blur / image switch, not a timer.
   inputEl.addEventListener("blur", () => {
     if (inputEl.value.trim().length > 0) addTag(inputEl.value);
-    closeSuggest();
+    suggest.close();
     if (dirty) void save();
   });
 
@@ -485,7 +404,7 @@ export function createTagEditor(options) {
     loadedText = "";
     dirty = false;
     saveError = null;
-    closeSuggest();
+    suggest.close();
     chipsEl.replaceChildren();
     countEl.textContent = "";
     warningEl.hidden = true;

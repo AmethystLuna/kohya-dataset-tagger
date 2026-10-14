@@ -296,6 +296,37 @@ await tick(); await tick();
 if (listEl.scrollTop !== 465) throw new Error("stepping up did not centre the directory entered: " + listEl.scrollTop);
 if (!hasClass(rowOf("inner"), "is-revealed")) throw new Error("the directory entered is not marked after stepping up");
 
+// 12) the current location is a breadcrumb above the listing: every ancestor is a button, the
+//     directory itself is plain text marked aria-current, and one click reaches an ancestor
+//     several levels up. This is what the user asked for - "an empty directory leaves you with
+//     no idea where you are" - so the empty-directory case below is the one that matters.
+const crumbTexts = () => byClass(backdrop, "picker-crumb").map((node) => node.textContent);
+const crumbsNow = () => byClass(backdrop, "picker-crumb");
+const currentCrumb = () => crumbsNow().filter((node) => hasClass(node, "is-current"));
+
+let crumbs = crumbsNow();
+if (crumbTexts().join("|") !== "/|outside") throw new Error("the location row reads " + crumbTexts().join("|"));
+if (crumbs[0].tagName !== "BUTTON") throw new Error("an ancestor in the location row is not clickable");
+if (currentCrumb().length !== 1) throw new Error("the location row has " + currentCrumb().length + " current segments");
+if (currentCrumb()[0].tagName !== "SPAN") throw new Error("the current directory is a button");
+if (currentCrumb()[0].attributes["aria-current"] !== "true") throw new Error("the current directory is not marked aria-current");
+
+// 12b) descending into an EMPTY directory keeps saying where we are, and one click on the root
+//      segment goes straight there instead of walking up one level at a time
+byClass(backdrop, "picker-dir")[0].fire("click");
+await tick(); await tick();
+if (calls[calls.length - 1] !== "/outside/inner") throw new Error("click did not descend: " + calls.join(" > "));
+if (byClass(backdrop, "picker-dir").length !== 0) throw new Error("the directory is not empty after all");
+if (crumbTexts().join("|") !== "/|outside|inner") {
+  throw new Error("an empty directory does not say where it is: " + crumbTexts().join("|"));
+}
+if (currentCrumb()[0].textContent !== "inner") throw new Error("the current segment is not the directory we are in");
+crumbsNow()[0].fire("click");
+await tick(); await tick();
+if (calls[calls.length - 1] !== "/") throw new Error("clicking an ancestor did not navigate: " + calls.join(" > "));
+if (crumbTexts().join("|") !== "/") throw new Error("the location row did not follow the navigation: " + crumbTexts().join("|"));
+if (currentCrumb()[0].tagName !== "SPAN") throw new Error("the filesystem root segment is a button");
+
 escape(documentListeners, dialogNode);
 await opened4;
 

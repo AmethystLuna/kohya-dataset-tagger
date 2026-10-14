@@ -84,6 +84,8 @@ src/kohya_dataset_tagger/
 ├── api/               # every module carries prefix="/api"
 │   ├── fs.py          # directory browsing (filters cache directories + path allowlist)
 │   ├── roots.py       # ★ runtime-editable roots and model search directories (§4.11, writes roots.txt / model_paths.txt)
+│   ├── pick.py        # §4.12 graphical directory picker (lists directories only + creates one, loopback gate)
+│   ├── reveal.py      # §4.18 show a directory **inside the allowlist** in the OS file manager
 │   ├── images.py      # images / thumbnails / metadata
 │   ├── captions.py    # caption read/write (atomic write + cache invalidation) + cache/status|invalidate + batch
 │   ├── tags.py        # tag frequency, autocomplete (**substring** match)
@@ -110,6 +112,7 @@ src/kohya_dataset_tagger/
     ├── js/theme.js    # ★ the theme: kdt.theme, readTheme/applyTheme, the switch (one writer for both)
     ├── js/strings.js  # i18n engine: locale resolution/switching, t(), applyCopy (contains no copy itself)
     ├── js/locales/    # one bundle per language (zh-CN / en / ja); key sets and {placeholders} must match exactly
+    ├── js/suggest.js  # tag autocomplete: the one dropdown the caption editor and the batch panel's tag fields share
     ├── js/palette.js  # T3: the command palette (Ctrl+K) - renders app.js's command table and owns no action itself
     ├── js/settings.js # §4.11's two panels: root add/remove in the left column + the tagger's "Model directory…" dialog
     ├── js/scale.js    # §4.14 image scaling/export panel (resolution + pipeline settings are shared via trainparams.js)

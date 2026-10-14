@@ -1437,6 +1437,101 @@ def test_batch_edit_tags_is_single_pass_and_position_aware(workspace) -> None:
     assert image.with_suffix(CAPTION_EXT).read_text(encoding="utf-8") == "HEAD2, y, b, c, z"
 
 
+def test_batch_edit_tags_orders_the_front_and_the_end(workspace) -> None:
+    """§4.5 ③'s `order_first` / `order_last` (2026-10-13): the manual reorder of a caption's tags.
+
+    The two blocks are the frontend's "front" and "end" containers; the tags in neither keep their
+    own relative order **between** them - that is what makes the middle container mean "leave these
+    alone" instead of "put them in a second, invented order". Everything here is asserted through
+    the real endpoint and the real file, and the last block proves the write matches the preview.
+    """
+    image = workspace.sample
+    caption = image.with_suffix(CAPTION_EXT)
+
+    def batch(**payload):
+        response = workspace.client.post("/api/captions/batch", json={"images": [str(image)], **payload})
+        assert response.status_code == 200, response.text[:300]
+        return caption.read_text(encoding="utf-8")
+
+    workspace.client.put("/api/captions", json={"image": str(image), "text": "a, b, c, d, e"})
+
+    # 1. a pure reorder: `c` to the front, `a` to the end, the rest keep their order between them
+    assert batch(op="edit_tags", order_first=["c"], order_last=["a"]) == "c, b, d, e, a"
+    # 2. the order blocks are ordered: the list order is the result order (the front block first)
+    assert batch(op="edit_tags", order_first=["e", "d"]) == "e, d, c, b, a"
+    # 3. a tag no caption carries is skipped, not invented, and a duplicate entry counts once
+    assert batch(op="edit_tags", order_first=["nope", "b", "b"]) == "b, e, d, c, a"
+    # 4. a tag in both blocks counts as front
+    assert batch(op="edit_tags", order_first=["c"], order_last=["c", "b"]) == "c, e, d, a, b"
+    # 5. rename + order in one request: the pair runs first, so the order names the NEW tag
+    assert batch(
+        op="edit_tags", pairs=[{"find": "e", "replace": "E"}], order_first=["E"]
+    ) == "E, c, d, a, b"
+    # 6. the addition's own `position` stays outside the order blocks - "prepend" is still the very front
+    assert batch(op="edit_tags", order_first=["a"], tags=["head"], position="prepend") == "head, a, E, c, d, b"
+    assert batch(op="edit_tags", order_last=["a"], tags=["tail"]) == "head, E, c, d, b, a, tail"
+    # 7. order-only is a valid request (the old "needs pairs or tags" guard must not reject it)
+    assert batch(op="edit_tags", order_last=["c"]) == "head, E, d, b, a, tail, c"
+
+    final = "head, E, d, b, a, tail, c"
+    assert caption.read_text(encoding="utf-8") == final
+
+    # 8. the preview equals the write: dry_run reports the same `after` the file ends up holding
+    preview = workspace.client.post("/api/captions/batch", json={
+        "images": [str(image)], "op": "edit_tags", "order_first": ["c", "a"], "dry_run": True,
+    }).json()
+    assert preview["applied"] == 1, preview
+    assert preview["results"][0]["after"] == "c, a, head, E, d, b, tail"
+    written = workspace.client.post("/api/captions/batch", json={
+        "images": [str(image)], "op": "edit_tags", "order_first": ["c", "a"],
+    }).json()
+    assert written["applied"] == 1, written
+    assert caption.read_text(encoding="utf-8") == preview["results"][0]["after"], (
+        "the preview and the write disagree about the order (§5 A35's rule, applied to ordering)"
+    )
+
+    # 9. an order that changes nothing is `changed: false`, and a bad `position` is still 400
+    unchanged = workspace.client.post("/api/captions/batch", json={
+        "images": [str(image)], "op": "edit_tags", "order_first": ["c"], "dry_run": True,
+    }).json()
+    assert unchanged["applied"] == 0 and unchanged["results"][0]["changed"] is False, unchanged
+    _assert_frozen_error(
+        workspace.client.post("/api/captions/batch", json={
+            "images": [str(image)], "op": "edit_tags", "order_first": ["c"], "position": "middle",
+        }),
+        400,
+        "bad_request",
+    )
+    assert caption.read_text(encoding="utf-8") == preview["results"][0]["after"]
+
+    # 10. `tags_first` / `tags_last` are the panel's per-container "add": a new tag is ADDED at the
+    #     outermost end of the block, and a tag the caption already carries is left alone (moving an
+    #     existing tag is what the order blocks are for - the panel sends both when the row exists)
+    assert batch(
+        op="edit_tags", tags_first=["brandnew"], order_first=["c"]
+    ) == "brandnew, c, a, head, E, d, b, tail"
+    assert batch(
+        op="edit_tags", tags_last=["lastnew"], order_last=["head"]
+    ) == "brandnew, c, a, E, d, b, tail, head, lastnew"
+    # both blocks in one request: each addition lands on its own side
+    assert batch(
+        op="edit_tags", tags_first=["front2"], tags_last=["back2"]
+    ) == "front2, brandnew, c, a, E, d, b, tail, head, lastnew, back2"
+    # an existing tag in a block addition is not duplicated, and a duplicate entry counts once
+    assert batch(
+        op="edit_tags", tags_first=["front2", "brandnew", "brandnew"], tags_last=["c"]
+    ) == "front2, brandnew, c, a, E, d, b, tail, head, lastnew, back2"
+    # a block addition on its own is a valid request
+    assert batch(op="edit_tags", tags_last=["solo"]) == (
+        "front2, brandnew, c, a, E, d, b, tail, head, lastnew, back2, solo"
+    )
+    # the legacy form is untouched: `tags` + `position` still mean "the very front / the very end",
+    # and they sit OUTSIDE the block additions
+    assert batch(op="edit_tags", tags=["outer"], position="prepend") == (
+        "outer, front2, brandnew, c, a, E, d, b, tail, head, lastnew, back2, solo"
+    )
+
+
 def test_batch_regex_replace_can_target_the_whole_caption(workspace) -> None:
     """`regex_replace_text` whole-caption replacement: commas in the result are split into new tags (the trainer's rule)."""
     image = workspace.sample

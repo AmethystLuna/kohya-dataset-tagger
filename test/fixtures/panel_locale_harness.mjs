@@ -183,8 +183,17 @@ assert(
   batchLegend && batchLegend.textContent === en["batch.commonTitle"],
   "the batch section legend must be English at construction, got " + (batchLegend && batchLegend.textContent),
 );
+// The add control is a permanent, full-width `+` (2026-10-13), and the element it appends - with the
+// add-tag placeholder in it - is built on the click. Both have to be in the resolved locale.
+const batchAdd = findOne(batchHost, (node) => node.tagName === "BUTTON" && node.textContent === "+");
+assert(
+  batchAdd && batchAdd.getAttribute("aria-label") === en["batch.commonAdd"],
+  "the batch add control must be named in English at construction, got " +
+    (batchAdd && batchAdd.getAttribute("aria-label")),
+);
+for (const handler of batchAdd.listeners.click || []) handler({});
 const batchPlaceholder = findOne(batchHost, (node) => node.placeholder === en["batch.commonAddPlaceholder"]);
-assert(batchPlaceholder, "the batch add-tag placeholder must be English at construction");
+assert(batchPlaceholder, "the element the + appends must be English when it appears");
 assert(
   findOne(batchHost, (node) => node.textContent === en["batch.hint"]),
   "the batch hint must be English at construction",

@@ -565,10 +565,22 @@ def test_preview_cap_is_blocked_client_side() -> None:
 
 
 def test_autocomplete_renders_the_category_name() -> None:
-    """§4.5: category is the category name ("General"), category_id is the numeric code ("0")."""
-    text = read(JS_ROOT / "tags.js")
-    assert "item.category" in text, "autocomplete does not read category"
-    assert "item.category_id" in text, "autocomplete has no category_id fallback (an old backend would show an empty badge)"
+    """§4.5: category is the category name ("General"), category_id is the numeric code ("0").
+
+    The row is built in one place now (`web/js/suggest.js`): the caption editor and the
+    batch panel's tag fields render the same dropdown, so the §4.5 rule is asserted where
+    the row is built and both hosts are asserted to be on it.
+    """
+    text = read(JS_ROOT / "suggest.js")
+    # The pushed lines, not the bare property names: `item.category` alone also
+    # matches inside `item.category_id`, so the weaker assertion stayed green while
+    # the category name was gone (found by falsifying it).
+    assert "parts.push(String(item.category));" in text, "autocomplete does not read the category name"
+    assert "parts.push(String(item.category_id));" in text, (
+        "autocomplete has no category_id fallback (an old backend would show an empty badge)"
+    )
+    for host in ("tags.js", "batch.js"):
+        assert 'from "./suggest.js"' in read(JS_ROOT / host), "%s does not use the shared autocomplete" % host
 
 
 # ---------------------------------------------------------------------------

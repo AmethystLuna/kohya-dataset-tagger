@@ -67,6 +67,7 @@ EXPECTED = {
     "view.crop": ("openTab", [(APP, "openTab = (kind) => {"), (APP, "onOpen: (kind) => { openTab(kind); },")]),
     "browse.refresh": ("refreshBrowse", [(APP, '$("btn-refresh").addEventListener("click", refreshBrowse);')]),
     "browse.parent": ("goToParent", [(APP, '$("btn-parent").addEventListener("click", goToParent);')]),
+    "browse.openFolder": ("openInFileManager", [(APP, '$("btn-open-folder").addEventListener("click", openInFileManager);')]),
     "browse.pickDataset": ("requestPick", [
         (APP, "onPickDataset: () => { void requestPick(); },"),
         (SETTINGS, "if (onPickDataset) pickButton.addEventListener(\"click\", () => { onPickDataset(); });"),

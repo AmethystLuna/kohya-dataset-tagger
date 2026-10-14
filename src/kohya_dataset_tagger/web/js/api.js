@@ -15,6 +15,7 @@ export const ROUTES = Object.freeze({
   rootsAdd: "POST /api/roots",
   rootsRemove: "DELETE /api/roots",
   fsList: "GET /api/fs/list",
+  fsReveal: "POST /api/fs/reveal",
   fsPick: "GET /api/fs/pick",
   fsPickMkdir: "POST /api/fs/pick/mkdir",
   imageThumb: "GET /api/images/thumb",
@@ -55,15 +56,17 @@ export const ROUTES = Object.freeze({
 export const THUMB_SIZE = Object.freeze({ GRID: "grid", PREVIEW: "preview" });
 
 /**
- * Caption batch operations accepted by /api/captions/batch (p0-spec section
- * 4.5 item 3, extended with prepend / edit_tags / regex_replace_text).
+ * Caption batch operations this frontend uses, from /api/captions/batch (p0-spec section 4.5 item 3).
  * REGEX_REPLACE edits each tag; REGEX_REPLACE_TEXT edits the whole caption.
+ *
+ * `append` / `prepend` / `remove` are deliberately absent (2026-10-13): the batch panel's common-tag
+ * editor covers them - its two container add rows add a tag at either end, clearing a row deletes a
+ * tag, and the replace op with an empty replacement removes a tag that is not common. **This is the frontend's
+ * own vocabulary**: the backend still accepts the three (it is the endpoint's primitive set), so the
+ * contract test only requires these to be a subset of the backend's op list.
  */
 export const BATCH_OP = Object.freeze({
   REPLACE: "replace",
-  APPEND: "append",
-  PREPEND: "prepend",
-  REMOVE: "remove",
   REGEX_REPLACE: "regex_replace",
   REGEX_REPLACE_TEXT: "regex_replace_text",
   EDIT_TAGS: "edit_tags",
@@ -175,6 +178,13 @@ export const api = {
   /** Section 4.11: DELETE carries its parameter in the query string, not a body. */
   removeRoot: (path) => request("rootsRemove", { query: { path } }),
   listDir: (path, recursive) => request("fsList", { query: { path, recursive: recursive ? "true" : "false" } }),
+  /**
+   * Section 4.18: show the directory on screen in the operating system's file manager. A POST
+   * because it starts a program on the server's machine; the path still goes through the
+   * allowlist, so only a directory the app is already browsing can be opened. 500
+   * no_file_manager when that machine has no launcher at all.
+   */
+  revealDir: (path) => request("fsReveal", { body: { path } }),
   /**
    * Section 4.12: list the sub directories of any directory (directories only,
    * no files and no counts) so the dataset root can be chosen graphically.

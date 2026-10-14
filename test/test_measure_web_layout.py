@@ -66,8 +66,11 @@ def test_the_wrapper_page_carries_the_placeholders_the_handler_substitutes() -> 
 def test_the_probe_measures_the_surfaces_this_repository_keeps_moving() -> None:
     module = load_tool()
     for selector in ("#readiness", "#scope-strip", "#caption-dock", "#gallery-filter", ".tab-panels",
-                     "#palette", "#palette-list", "#gallery-toolbar", "#theme-dark", "#lang-select",
-                     ".breadcrumb-row", "#dir-counts"):
+                     "#palette", "#palette-list", "#gallery-toolbar", "#btn-open-folder",
+                     "#theme-dark", "#lang-select", ".breadcrumb-row", "#dir-counts",
+                     ".batch-order", ".batch-order-top", '.batch-bucket[data-bucket="front"]',
+                     '.batch-bucket[data-bucket="middle"]', '.batch-bucket[data-bucket="back"]',
+                     ".batch-grip", ".batch-bucket-add", ".batch-bucket-rows"):
         assert selector in module.SELECTORS, "%s is not measured any more" % selector
 
 

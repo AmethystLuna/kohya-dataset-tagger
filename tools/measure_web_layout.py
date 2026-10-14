@@ -117,6 +117,18 @@ SELECTORS = (
     ".tab-panels",
     "#caption-dock",
     "#gallery-toolbar",
+    "#btn-open-folder",
+    # §4.5 ③'s manual order editor: the container host and the two containers the single-image
+    # layout closes (a hidden container that still measured as visible would be a laying-out bug
+    # no fixture can see).
+    ".batch-order",
+    ".batch-order-top",
+    '.batch-bucket[data-bucket="front"]',
+    '.batch-bucket[data-bucket="middle"]',
+    '.batch-bucket[data-bucket="back"]',
+    ".batch-grip",
+    ".batch-bucket-add",
+    ".batch-bucket-rows",
     "#gallery-filter",
     "#gallery",
     "#jobs",

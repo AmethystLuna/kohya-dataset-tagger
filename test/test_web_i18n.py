@@ -115,6 +115,9 @@ def test_every_dynamic_panel_is_relabelled_on_a_switch() -> None:
         # time**; running onShow() only while the tab is active cannot rescue them,
         # so they must be registered unconditionally (a bug measured 2026-09-19).
         "batchPanel", "exportPanel", "scalePanel",
+        # The picker is one dialog built at module scope, and every string in it is t() at
+        # construction (2026-10-13: it stayed in the language it was built in until a reload).
+        "picker",
     )
     for component in components:
         assert "relabelComponent(%s)" % component in body, (

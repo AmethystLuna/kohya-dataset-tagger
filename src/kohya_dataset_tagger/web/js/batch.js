@@ -16,15 +16,20 @@
  *  3. The common-tag editor is position free: one input per common tag. Editing
  *     a line renames that tag, clearing a line removes it, and deleting a line
  *     does NOT shift the meaning of the lines after it (a plain comma separated
- *     text box would, which is why this is a row list).
+ *     text box would, which is why this is a row list). The same rows are also
+ *     the **manual order** editor (2026-10-13): their two order containers are
+ *     the backend's `order_first` / `order_last`, and the middle one means "leave
+ *     these where they are" - so it is never sent. A role="list" of rows beside
+ *     this editor would be a second live copy of the same tags.
  *
- * The pure helpers (commonTags / commonEdit / splitTagInput) are exported so the
- * headless harness can test them without a DOM.
+ * The pure helpers (commonTags / commonEdit / blockAdditions / orderEdit / moveRowIn)
+ * are exported so the headless harness can test them without a DOM.
  */
 
 import { api, BATCH_OP, batchStreamUrl, thumbUrl, THUMB_SIZE } from "./api.js";
 import { forgetJob, rememberJob } from "./jobstore.js";
 import { t } from "./strings.js";
+import { rankSuggestions, createSuggest } from "./suggest.js";
 import { renderCaptionDiff } from "./autotag.js";
 
 /** Local pseudo-op: edit the tags common to every visible image. */
@@ -37,11 +42,6 @@ export const PREVIEW_ROWS = 8;
 //: editable common-tag rows rendered. 1653 image datasets can share thousands
 //: of tags; the search-able frequency table is the place to look those up.
 export const COMMON_ROWS = 200;
-
-/** Parse a comma separated tag input the way the backend splits captions. */
-export function splitTagInput(raw) {
-  return String(raw || "").split(",").map((part) => part.trim()).filter((part) => part.length > 0);
-}
 
 /**
  * Tags present in EVERY list, ordered case-insensitively by name.
@@ -68,12 +68,13 @@ function compareTags(a, b) {
 }
 
 /**
- * Turn the edited common-tag rows into an edit_tags request body.
- *   - a row whose value changed -> rename pair
- *   - a row cleared to empty    -> delete pair (replace: "")
- *   - extra tags               -> appended (deduped, order kept)
+ * Turn the edited common-tag rows into rename pairs: a row whose value changed is a rename, a row
+ * cleared to empty is a delete (`replace: ""`).
+ *
+ * Additions are **not** here any more (2026-10-13): a new tag belongs to a container, and the two
+ * containers carry their own additions (`blockAdditions` below).
  */
-export function commonEdit(original, values, added) {
+export function commonEdit(original, values) {
   const source = Array.isArray(original) ? original : [];
   const rows = Array.isArray(values) ? values : [];
   const pairs = [];
@@ -82,18 +83,112 @@ export function commonEdit(original, values, added) {
     const value = String(raw).trim();
     if (value !== tag) pairs.push({ find: tag, replace: value });
   });
-  const known = new Set(source);
-  const tags = [];
-  for (const raw of Array.isArray(added) ? added : []) {
-    const tag = String(raw).trim();
-    if (!tag || known.has(tag) || tags.indexOf(tag) >= 0) continue;
-    tags.push(tag);
+  return { pairs };
+}
+
+/**
+ * The additions of the two order blocks, as `edit_tags`' `tags_first` / `tags_last`.
+ *
+ * `added` is `[{tag, where}]` in the order the user typed them, `where` being one of the two
+ * container names. A tag that is already a row of the common list is skipped: it is not an addition,
+ * it is a tag to move, and the row already knows how to do that (drag it). Duplicates count once.
+ */
+export function blockAdditions(added, rows) {
+  const known = new Set((Array.isArray(rows) ? rows : []).map((tag) => String(tag)));
+  const first = [];
+  const last = [];
+  const seen = new Set();
+  for (const item of Array.isArray(added) ? added : []) {
+    const tag = String(item && item.tag !== undefined ? item.tag : item || "").trim();
+    if (!tag || known.has(tag) || seen.has(tag)) continue;
+    seen.add(tag);
+    if (item && item.where === "back") last.push(tag);
+    else first.push(tag);
   }
-  return { pairs, tags };
+  // An empty block is not sent, for the same reason `orderEdit` leaves an unmoved middle out: the
+  // request should carry what the user did, and `tags_last: []` reads like a decision.
+  const out = {};
+  if (first.length > 0) out.tags_first = first;
+  if (last.length > 0) out.tags_last = last;
+  return out;
 }
 
 function describeError(err) {
   return err && err.message ? err.message : String(err);
+}
+
+/** The three containers of the manual order editor, in the order they are rendered. */
+export const ORDER_BUCKETS = ["front", "middle", "back"];
+
+/** An empty container set: everything in the middle, i.e. "nothing has been moved". */
+export function emptyBuckets() {
+  return { front: [], middle: [], back: [] };
+}
+
+/**
+ * Move one row inside the containers. Returns true when something really moved.
+ *
+ * Rows are identified by their index in the common-tag list, so a rename or a
+ * delete (which are carried by the edit's `pairs`) cannot make a row's container
+ * point at a different tag. `before` is the row to insert in front of, or -1 for
+ * "at the end".
+ *
+ * Two rules come straight from what the containers mean:
+ *   - a move **inside the middle** does nothing at all. The middle is "leave these
+ *     where they are", so it has no order of its own to change (and the backend is
+ *     never sent it), while a move *into* or *out of* the middle is a real move;
+ *   - dropping a row onto itself is not a move.
+ */
+export function moveRowIn(buckets, index, bucket, before) {
+  if (!buckets || !buckets[bucket]) return false;
+  if (before === index) return false;
+  const from = ORDER_BUCKETS.find((name) => (buckets[name] || []).indexOf(index) >= 0);
+  if (from === "middle" && bucket === "middle") return false;
+  for (const name of ORDER_BUCKETS) {
+    const at = (buckets[name] || []).indexOf(index);
+    if (at >= 0) buckets[name].splice(at, 1);
+  }
+  const target = buckets[bucket];
+  let at = before === undefined || before === null ? -1 : target.indexOf(before);
+  if (at < 0) at = target.length;
+  target.splice(at, 0, index);
+  return true;
+}
+
+/**
+ * The order half of an `edit_tags` request, from the containers (`{front, middle, back}`
+ * of row indices) and the rows' current values.
+ *
+ * An empty object means "send no order at all", which is the honest answer in two
+ * cases: nothing was moved out of the middle (a multi-image scope), or the rows are
+ * still in their original sequence (a single image, where a rename is carried by
+ * `pairs` and not by the order). Sending an order that changes nothing would make
+ * every preview say "0 changed" instead of "nothing to do".
+ *
+ * With a single image in scope the one container **is** the caption's order, so it
+ * is sent whole: that is what lets the middleware-free reorder be a plain "this,
+ * then that".
+ */
+export function orderEdit(buckets, values, single) {
+  const state = buckets || emptyBuckets();
+  const rows = Array.isArray(values) ? values : [];
+  const list = (name) =>
+    (state[name] || [])
+      .map((index) => String(rows[index] === undefined ? "" : rows[index]).trim())
+      .filter((tag) => tag.length > 0);
+  const body = {};
+  if (single) {
+    const order = state.front || [];
+    const original = order.slice().sort((a, b) => a - b);
+    if (order.join(",") === original.join(",")) return body;
+  } else if ((state.front || []).length === 0 && (state.back || []).length === 0) {
+    return body;
+  }
+  const first = list("front");
+  const last = single ? [] : list("back");
+  if (first.length > 0) body.order_first = first;
+  if (last.length > 0) body.order_last = last;
+  return body;
 }
 
 function cacheFailureCount(result) {
@@ -127,6 +222,12 @@ export function createBatchPanel(options) {
   const getTags = config.getTags || (() => null);
   //: Called after the scope changes; the app uses it to probe captions for the new set.
   const onScopeChange = config.onScopeChange || (() => {});
+  //: Ask the app to read the captions of these paths (app.js's probeScopeCaptions). The common-tag
+  //: editor can compute nothing without them, and a scope can reach outside the directory on screen
+  //: ("current directory + subdirectories", a selection), so "somebody else has probed it" is not an
+  //: assumption this panel may make - without this it sat on its "reading caption…" note with empty
+  //: containers forever (reported 2026-10-13).
+  const requestCaptions = config.requestCaptions || (() => {});
   //: The job shelf (js/jobs.js); optional so the panel still runs headless without one.
   const shelf = config.jobs || null;
   //: Same value as the tagger, the scale panel and the cache panel.
@@ -172,6 +273,44 @@ export function createBatchPanel(options) {
     input.autocomplete = "off";
     return input;
   };
+  //: Every autocomplete this panel built, so a mode switch can close them all.
+  const tagSuggests = [];
+  /**
+   * A tag field: the input plus the shared dropdown under it (suggest.js).
+   *
+   * The wrapper is built here, not inside suggest.js, because the dropdown is
+   * positioned by the host's own `.suggest-wrap` and this panel's CSS expects the
+   * input where it always was. `accept` is the host's own completion - a plain
+   * field takes the tag as its whole value, the comma separated list has one -
+   * and `mode` says which half of the candidates the field may offer (see
+   * suggestTags): a function when the answer depends on the current op, which is
+   * how one field can serve append, prepend and remove.
+   */
+  const tagField = (className, options) => {
+    const opts = options || {};
+    // The mode may depend on the current op (one field serves append, prepend and
+    // remove), so it is read per query rather than captured once.
+    const readMode = () => (typeof opts.mode === "function" ? opts.mode() : opts.mode);
+    const input = textInput(className);
+    const list = make("div", "suggest");
+    list.hidden = true;
+    const wrap = make("div", "suggest-wrap");
+    wrap.append(input, list);
+    tagSuggests.push(createSuggest({
+      input,
+      list,
+      source: (query, limit) => suggestTags(query, limit, readMode()),
+      query: opts.query,
+      onAccept: (tag) => {
+        if (opts.accept) opts.accept(input, tag);
+        else input.value = tag;
+        // A programmatic value change fires no "input" event, and the preview on
+        // screen describes the parameters of the previous field values.
+        invalidatePreview();
+      },
+    }));
+    return { input, wrap };
+  };
   const checkbox = (className) => {
     const input = make("input", className);
     input.type = "checkbox";
@@ -199,12 +338,35 @@ export function createBatchPanel(options) {
   // above the tab panels) and hands the same instance to the tagger, so both panels act on one
   // value. This panel used to construct its own over its own <select> - two answers to one
   // question, and the one the button obeyed was not the one the other panel showed.
+  //: Guards the repaint path below against re-entering refreshScope (which repaints the control
+  //: itself, and that notifies onPaint again).
+  let refreshingScope = false;
+
+  /**
+   * A repaint of the control can mean the **answer** changed, not only the label: the recursive
+   * listing arriving, or another panel's selection change, moves the scope's paths while the select's
+   * value stays the same - and `onChange` never fires for that. The signature is what tells the two
+   * apart, and the guard is what keeps the inner `scope.paint()` (inside refreshScope) from looping.
+   */
+  function onScopePaint() {
+    if (panel.hidden) return;
+    refreshButtons();
+    if (refreshingScope) return;
+    if (scope.paths().join("\n") === lastSig) return;
+    refreshingScope = true;
+    try {
+      refreshScope();
+    } finally {
+      refreshingScope = false;
+    }
+  }
+
   scope.subscribe({
     // The control is shared, so it is repainted by whichever panel noticed the change; the buttons
     // of this panel are only on screen while its tab is. Running scopeInfo() for a panel nobody is
     // looking at would walk the whole scope once per caption chunk - the O(N^2) the chunked probe
     // exists to avoid - and onShow() recomputes them when the tab comes back.
-    onPaint: () => { if (!panel.hidden) refreshButtons(); },
+    onPaint: onScopePaint,
     onChange: () => {
       // A different scope is a different diff: the preview described another set of images.
       invalidatePreview();
@@ -215,11 +377,12 @@ export function createBatchPanel(options) {
   const pendingNote = paintText(make("p", "hint"), "batch.commonPending");
   pendingNote.hidden = true;
 
+  // The op list is the panel's own: the common-tag editor covers "add a tag", "put a tag in front"
+  // and "remove a tag" (its add rows, its containers, and clearing a row), so the three standalone
+  // ops were dropped on 2026-10-13 (the common-tag editor covers them). A tag that is not
+  // common is still removable with the replace op (leave the replacement empty).
   const OP_CHOICES = [
     [BATCH_COMMON, "batch.opCommon"],
-    [BATCH_OP.APPEND, "batch.opAppend"],
-    [BATCH_OP.PREPEND, "batch.opPrepend"],
-    [BATCH_OP.REMOVE, "batch.opRemove"],
     [BATCH_OP.REPLACE, "batch.opReplace"],
     [BATCH_OP.REGEX_REPLACE, "batch.opRegexTag"],
     [BATCH_OP.REGEX_REPLACE_TEXT, "batch.opRegexText"],
@@ -234,41 +397,142 @@ export function createBatchPanel(options) {
     opSelect.append(option);
   }
 
-  // ---- section: common tags --------------------------------------------
-  const commonList = make("div", "batch-common-list");
-  const commonNone = paintText(make("p", "hint"), "batch.commonNone");
-  const commonAddInput = textInput("batch-common-add");
-  paintAttr(commonAddInput, "placeholder", "batch.commonAddPlaceholder");
-  const commonAddButton = copyButton("btn", "batch.commonAdd");
-  const addedList = make("div", "chips batch-added");
-  const commonPrepend = checkbox();
+  // ---- section: common tags (one editable, orderable row per tag) --------
+  // The rows ARE the tags: one input per common tag (up to COMMON_ROWS). A renamed row renames that
+  // tag, a cleared row deletes it, a deleted row does not shift the ones after it, and the row's
+  // grip sets the order. There is deliberately no second list anywhere - a separate "reorder" panel
+  // beside this editor would be two live copies of the same tags, and they would drift apart.
+  //
+  // The containers are the backend's two order blocks plus a middle that means "leave these where
+  // they are", so the middle is never sent. With a single image in scope the middle is pointless -
+  // that image's own order IS the answer - so the same rows live in one container.
+  const orderHost = make("div", "batch-order");
+  // The two **drop targets** share the top row, and the middle - which starts out holding every
+  // common tag - sits below them: dragging a tag to the front / end container must not mean dragging past a 200-row
+  // list first, and this way the two targets are the first thing on screen. That row is sticky in CSS,
+  // so scrolling the long middle list cannot take the targets away mid-drag either.
+  const orderTop = make("div", "batch-order-top");
+  orderHost.append(orderTop);
+  const orderHint = make("p", "hint");
+  const bucketNodes = {};
+  const bucketTitles = {};
+  const bucketRows = {};
+  const bucketAdded = {};
+  const bucketAdd = {};
+  for (const name of ORDER_BUCKETS) {
+    const bucket = make("section", "batch-bucket");
+    bucket.dataset.bucket = name;
+    const title = make("div", "batch-bucket-title");
+    const rows = make("div", "batch-bucket-rows");
+    // The tags **added** to this block: they are not rows of the common list (they are not in every
+    // caption), so they are chips - and they live in the container they belong to, which is the whole
+    // point of choosing a container. They render on the block's **outer** side (above the rows in the
+    // front container, below them in the end one), because that is where they land in the caption.
+    //: The additions of this block - real rows, painted by paintAdded(), on the block's outer side.
+    const chips = make("div", "batch-bucket-added");
+    // The chips sit on the block's **outer** side - above the rows in the front container, below them
+    // in the end one - because that is where the added tags land in the caption (`tags_first` is
+    // spliced before the moved tags, `tags_last` after them).
+    if (name === "front") bucket.append(title, chips, rows);
+    else bucket.append(title, rows, chips);
+    //: The front and end containers each carry a **permanent** add row: one full-width dashed `+`, the
+    //: whole row and always there ("the dashed box can stay put"). Clicking it does not turn it into a box - it
+    //: **appends a new element** to the container (an addition row, exactly the shape of a tag row), and
+    //: an element left empty and blurred removes itself again. The middle gets none: an addition can
+    //: only be expressed at one of the two ends.
+    if (name !== "middle") {
+      const addButton = make("button", "batch-bucket-add");
+      addButton.type = "button";
+      addButton.textContent = "+";
+      // `setAttribute`, not `paintAttr`: `aria-label` is not a property of an element, so assigning it
+      // would set a useless JS field and the accessible name would never exist. The painter below
+      // repaints it on a language switch.
+      addButton.setAttribute("aria-label", t("batch.commonAdd"));
+      addButton.title = t("batch.commonAdd");
+      addButton.addEventListener("click", () => { addBucketRow(name); });
+      const addRow = make("div", "batch-common-row batch-bucket-add-row");
+      addRow.append(addButton);
+      bucket.append(addRow);
+      bucketAdd[name] = addButton;
+    }
+    // The whole container is the drop target, not only its rows: an empty front container has to be
+    // droppable, and "the container you are over" is what the highlight marks.
+    bucket.addEventListener("dragover", (event) => {
+      if (dragging === null && draggingAdd === null) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      paintDropTarget(name);
+    });
+    bucket.addEventListener("dragleave", () => { clearDropTarget(); });
+    bucket.addEventListener("drop", (event) => {
+      if (dragging === null && draggingAdd === null) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      // An addition dropped here is added at *this* end instead; the middle is not somewhere an
+      // addition can live, so dropping one there takes it out again.
+      if (draggingAdd !== null) {
+        const item = draggingAdd;
+        endDrag();
+        moveAddTo(item, name);
+        return;
+      }
+      const moved = dragging;
+      const before = rowIndexUnder(event.target, bucket);
+      endDrag();
+      if (moveRowIn(orderBuckets, moved, name, before)) { layoutBuckets(); invalidatePreview(); }
+    });
+    // The two order blocks go side by side on the top row; the middle - the long one - below them.
+    if (name === "middle") orderHost.append(bucket);
+    else orderTop.append(bucket);
+    bucketNodes[name] = bucket;
+    bucketTitles[name] = title;
+    bucketRows[name] = rows;
+    bucketAdded[name] = chips;
+  }
+  //: The front container's own name and the hint both depend on the mode, and the mode is runtime
+  //: state - so they are painted by one function that reads it, registered here for a language switch
+  //: and called by layoutBuckets() whenever the mode could have changed.
+  painters.push(paintModeCopy);
+  //: The two + rows are the containers' permanent add control; their accessible name is copy too.
+  painters.push(() => {
+    for (const addName of ORDER_BUCKETS) {
+      const node = bucketAdd[addName];
+      if (!node) continue;
+      node.setAttribute("aria-label", t("batch.commonAdd"));
+      node.title = t("batch.commonAdd");
+    }
+  });
+  paintText(bucketTitles.middle, "batch.orderMiddle");
+  paintText(bucketTitles.back, "batch.orderBack");
+
+  // The empty state names *which* nothing this is: "no images in the scope" and "the images share no
+  // tag" are different facts, and the first one has a next step (choose a scope) while the second one
+  // is a statement about the data. One key for both made the second read like a broken feature - and
+  // painting it at construction time made it lie about a scope that was filled in later.
+  const commonNone = make("p", "hint");
+  //: The "N more common tags are not listed" note, rebuilt by paintCommonRows (COMMON_ROWS cap).
+  const commonNote = make("div");
   const commonSection = make("fieldset", "box batch-section");
   commonSection.append(
     paintText(make("legend"), "batch.commonTitle"),
     paintText(make("p", "hint"), "batch.commonHint"),
-    commonList,
+    orderHost,
     commonNone,
-    addedList,
-    (() => { const row = make("div", "row"); row.append(commonAddInput, commonAddButton); return row; })(),
-    inline(commonPrepend, "batch.commonPrepend"),
-  );
-
-  // ---- section: plain tag list -----------------------------------------
-  const tagsInput = textInput();
-  const tagsSection = make("fieldset", "box batch-section");
-  tagsSection.append(
-    field("batch.tagsLabel", tagsInput),
-    paintText(make("p", "hint"), "batch.tagsHint"),
+    commonNote,
+    orderHint,
   );
 
   // ---- section: replace -------------------------------------------------
-  const findInput = textInput();
-  const replaceInput = textInput();
+  // "Find" names a tag the scope already carries, so it suggests from the scope
+  // only; "replace with" may be a tag no image has yet, so the vocabulary is
+  // there for it.
+  const findField = tagField(null, { mode: "dataset" });
+  const findInput = findField.input;
+  const replaceField = tagField(null);
+  const replaceInput = replaceField.input;
   const replaceIgnoreCase = checkbox();
   const replaceSection = make("fieldset", "box batch-section");
   replaceSection.append(
-    field("batch.findLabel", findInput),
-    field("batch.replaceLabel", replaceInput),
+    field("batch.findLabel", findField.wrap),
+    field("batch.replaceLabel", replaceField.wrap),
     inline(replaceIgnoreCase, "batch.ignoreCase"),
   );
 
@@ -341,7 +605,6 @@ export function createBatchPanel(options) {
     pendingNote,
     field("batch.op", opSelect),
     commonSection,
-    tagsSection,
     replaceSection,
     regexSection,
     actions,
@@ -383,6 +646,19 @@ export function createBatchPanel(options) {
   let commonOriginal = [];
   let commonRows = [];
   let addedTags = [];
+  //: The three containers (row indices) and the order inside them; index-aligned with
+  //: commonOriginal / commonRows, so a rename cannot make a container point at another tag.
+  let orderBuckets = emptyBuckets();
+  //: One image in scope -> one container holding that caption's own order (see orderEdit).
+  let reorderSingle = true;
+  //: How many images the scope holds right now; the empty state says which nothing this is.
+  let scopeImageCount = 0;
+  //: The row being dragged (an index), or null. Row 0 is a real row: never test truthiness.
+  let dragging = null;
+  //: The addition row being dragged (the grip of a row in `bucketAdded`): see startAddDrag.
+  let draggingAdd = null;
+  //: The row elements, index-aligned with commonOriginal: `{row, grip, input, remove}`.
+  let rowNodes = [];
 
   function currentOp() {
     return opSelect.value || BATCH_COMMON;
@@ -401,43 +677,363 @@ export function createBatchPanel(options) {
     return { paths, lists, missing };
   }
 
+  //: Tag (lowercased) -> {tag, count} over the scope's captions; null = not built.
+  let scopeTagIndex = null;
+  //: Images of the scope whose caption is not known yet: while this is > 0 the index
+  //: is incomplete, and a "dataset" field still falls back to the vocabulary.
+  let scopeTagMissing = 0;
+
+  /** How many images of the scope carry each tag (one image counts once per tag). */
+  function buildScopeTagIndex(lists) {
+    const index = new Map();
+    for (const tags of lists) {
+      for (const tag of new Set(tags)) {
+        const key = String(tag).toLowerCase();
+        const known = index.get(key);
+        if (known) known.count += 1;
+        else index.set(key, { tag: String(tag), count: 1 });
+      }
+    }
+    return index;
+  }
+
+  /**
+   * The index is rebuilt wherever the scope is re-read (a scope change, a caption
+   * probe chunk, a finished write) and never per keystroke: the walk is the same
+   * order of work the common-tag rows already do there, and a suggestion list that
+   * is one chunk behind is worse than a slow one.
+   */
+  function scopeTagIndexNow() {
+    if (!scopeTagIndex) {
+      const info = scopeInfo();
+      scopeTagIndex = buildScopeTagIndex(info.lists);
+      scopeTagMissing = info.missing;
+    }
+    return scopeTagIndex;
+  }
+
+  /**
+   * Candidates for a tag field: the tags this scope actually uses first, then the
+   * WD14 vocabulary through §4.10's endpoint.
+   *
+   * The dataset half comes first because it costs no request and is the useful
+   * answer for remove / replace / find - those ops name a tag the images already
+   * carry. The vocabulary half is what finds a tag no image carries yet, and it is
+   * allowed to answer nothing: with no tagger model installed §4.10 returns an
+   * empty list, and a dataset tag must still be suggested then.
+   *
+   * `mode` is what a field asks for:
+   *   "both" (default) - the dataset's tags, then the vocabulary (append, prepend,
+   *     replace, the common-tag add field: all of them may name a tag no image has
+   *     yet, or write one in the vocabulary's own spelling);
+   *   "dataset" - the scope's tags only (find, and remove's list). A tag no image
+   *     carries matches nothing in those ops, so offering it is a suggestion that
+   *     cannot be acted on.
+   * The one exception is a scope whose captions are still being read: the index is
+   * incomplete then, and suppressing the vocabulary would mean suggesting nothing
+   * at all - so the vocabulary is allowed until the probe finishes.
+   */
+  async function suggestTags(query, limit, mode) {
+    const needle = String(query || "").trim();
+    if (!needle) return [];
+    const local = rankSuggestions(Array.from(scopeTagIndexNow().values()), needle, limit);
+    if (local.length >= limit) return local;
+    if (mode === "dataset" && scopeTagMissing === 0) return local;
+    let vocabulary = [];
+    try {
+      const payload = await api.tagAutocomplete(needle, limit);
+      vocabulary = (payload && payload.suggestions) || [];
+    } catch (err) {
+      vocabulary = [];  // an addition, never a reason to show nothing at all
+    }
+    const seen = new Set(local.map((item) => String(item.tag).toLowerCase()));
+    const merged = local.slice();
+    for (const item of vocabulary) {
+      if (!item || !item.tag) continue;
+      const key = String(item.tag).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+      if (merged.length >= limit) break;
+    }
+    return merged;
+  }
+
+  /**
+   * Paint the additions of both blocks as **editable rows**, inside the container each belongs to.
+   *
+   * They are rows, not chips (the user: "implement it by adding a new element"): clicking the permanent + of
+   * a container appends one of these - the same shape as a tag row (grip, input, the × that removes it) -
+   * so adding a tag is the same gesture as editing one, and an element left empty and blurred is simply
+   * taken away again. A row here is an *addition*: it is not in every caption, which is why it is not one
+   * of the common rows and why it travels in the request as `tags_first` / `tags_last`.
+   *
+   * An existing row is **reused and only re-labelled**, not rebuilt: `relabel()` runs this on a language
+   * switch, and a rebuild would throw away a half-typed tag (it would also lose the focus). The copy is
+   * therefore painted here on every call rather than registered as a painter.
+   */
   function paintAdded() {
-    addedList.replaceChildren();
-    for (const tag of addedTags) {
-      const chip = make("span", "chip", tag);
-      const remove = button("chip-remove", "\u00d7");
-      remove.title = t("caption.remove");
+    for (const name of ORDER_BUCKETS) bucketAdded[name].replaceChildren();
+    for (const item of addedTags) {
+      const row = item.row || buildAddedRow(item);
+      const label = item.tag || t("batch.commonAddPlaceholder");
+      item.input.placeholder = t("batch.commonAddPlaceholder");
+      item.grip.setAttribute("aria-label", t("batch.dragHandle", { tag: label }));
       // The visible glyph is "×"; name the button after the tag it removes.
-      remove.setAttribute("aria-label", t("caption.remove").concat(" ").concat(tag));
-      remove.addEventListener("click", () => {
-        addedTags = addedTags.filter((value) => value !== tag);
-        paintAdded();
-        invalidatePreview();
-      });
-      chip.append(remove);
-      addedList.append(chip);
+      item.remove.setAttribute("aria-label", t("caption.remove").concat(" ").concat(label));
+      bucketAdded[item.where === "back" ? "back" : "front"].append(row);
     }
   }
 
-  function addCommonTag() {
-    const tag = commonAddInput.value.trim();
-    if (!tag) return;
-    if (addedTags.indexOf(tag) < 0 && commonOriginal.indexOf(tag) < 0) {
-      addedTags = addedTags.concat([tag]);
-      paintAdded();
-    }
-    commonAddInput.value = "";
+  /** Build one addition row and wire it once; paintAdded() re-labels it from then on. */
+  function buildAddedRow(item) {
+    const row = make("div", "batch-common-row batch-added-row");
+    const grip = make("span", "batch-grip", "\u28ff");
+    grip.setAttribute("role", "button");
+    grip.tabIndex = 0;
+    grip.draggable = true;
+    const input = textInput("batch-common-input batch-added-input");
+    input.value = item.tag;
+    const remove = button("btn btn-mini batch-common-remove", "\u00d7");
+    remove.title = t("caption.remove");
+    input.addEventListener("input", () => {
+      item.tag = input.value.trim();
+      invalidatePreview();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dropAdded(item);
+        return;
+      }
+      if (event.key !== "Enter" || event.defaultPrevented) return;
+      event.preventDefault();
+      commitAdded(item);
+    });
+    // Nothing typed and the focus is gone: the element was never wanted, so it goes away by itself.
+    input.addEventListener("blur", () => { commitAdded(item); });
+    remove.addEventListener("click", () => { dropAdded(item); });
+    // The grip takes the addition to the other container - choosing the end is the one thing an
+    // addition can be *moved* for (the two containers carry `tags_first` / `tags_last`).
+    grip.addEventListener("dragstart", (event) => { startAddDrag(item, row, event); });
+    grip.addEventListener("dragend", () => { endDrag(); });
+    row.append(grip, input, remove);
+    item.row = row;
+    item.grip = grip;
+    item.input = input;
+    item.remove = remove;
+    return row;
+  }
+
+  /** Append an empty addition row to one of the two blocks and put the cursor in it. */
+  function addBucketRow(where) {
+    const item = { tag: "", where };
+    addedTags = addedTags.concat([item]);
+    paintAdded();
+    if (item.input && typeof item.input.focus === "function") item.input.focus();
     invalidatePreview();
+  }
+
+  /** Take an addition out again (the ×, Escape, an empty blur, or a drop into the middle). */
+  function dropAdded(item) {
+    addedTags = addedTags.filter((value) => value !== item);
+    paintAdded();
+    invalidatePreview();
+  }
+
+  /**
+   * The addition is done being typed. An empty one disappears; one that names a tag of the common list
+   * is refused - that tag is already in the list, and the row is the control for *moving* it.
+   */
+  function commitAdded(item) {
+    const tag = String(item.tag || "").trim();
+    if (!tag) {
+      dropAdded(item);
+      return;
+    }
+    if (commonOriginal.indexOf(tag) >= 0) {
+      notify(t("batch.addIsCommon", { tag }), "warn");
+      dropAdded(item);
+      return;
+    }
+    invalidatePreview();
+  }
+
+  /** Move an addition to the other block; the middle is not somewhere an addition can live. */
+  function moveAddTo(item, where) {
+    if (where === "middle") {
+      dropAdded(item);
+      return;
+    }
+    if (item.where === where) return;
+    item.where = where;
+    paintAdded();
+    invalidatePreview();
+  }
+
+  /** Rewrite the three containers from the state: a moved row is in exactly one of them, in order. */
+  function layoutBuckets() {
+    for (const name of ORDER_BUCKETS) {
+      bucketRows[name].replaceChildren(...orderBuckets[name].map((index) => rowNodes[index].row));
+    }
+    orderHost.classList.toggle("is-single", reorderSingle);
+    // The front container's name and the hint are **mode** copy, and the mode is runtime state: a
+    // construction-time painting left the single-image wording in place while three containers were
+    // on screen (seen in a screenshot: the single-container title above the two other containers).
+    paintModeCopy();
+  }
+
+  /** The two strings that depend on the mode; also registered as painters (see `painters`). */
+  function paintModeCopy() {
+    bucketTitles.front.textContent = t(reorderSingle ? "batch.orderSingle" : "batch.orderFront");
+    orderHint.textContent = t(reorderSingle ? "batch.orderHintSingle" : "batch.orderHintMulti");
+  }
+
+  /** Which container a row is in right now. */
+  function bucketOf(index) {
+    return ORDER_BUCKETS.find((name) => orderBuckets[name].indexOf(index) >= 0) || null;
+  }
+
+  /** The row index an event landed on, walking up to `host`; -1 = the container's own background. */
+  function rowIndexUnder(node, host) {
+    for (let current = node; current && current !== host; current = current.parentNode) {
+      const index = rowNodes.findIndex((entry) => entry.row === current);
+      if (index >= 0) return index;
+    }
+    return -1;
+  }
+
+  function paintDropTarget(name) {
+    for (const other of ORDER_BUCKETS) bucketNodes[other].classList.toggle("is-drop-target", other === name);
+  }
+
+  function clearDropTarget() {
+    for (const other of ORDER_BUCKETS) bucketNodes[other].classList.remove("is-drop-target");
+  }
+
+  function startDrag(index, row, event) {
+    dragging = index;
+    draggingAdd = null;
+    row.classList.add("is-dragging");
+    // The drag image is the whole row, not the little grip: dragging "the handle" alone would read
+    // as if the handle were what moves. Both calls are optional (a browser may refuse either).
+    const transfer = event ? event.dataTransfer : null;
+    if (transfer) {
+      if (typeof transfer.setData === "function") transfer.setData("text/plain", String(index));
+      if (typeof transfer.setDragImage === "function") transfer.setDragImage(row, 8, 8);
+    }
+  }
+
+  /** The same gesture for an **addition** row: what moves is which end the tag is added to. */
+  function startAddDrag(item, row, event) {
+    dragging = null;
+    draggingAdd = item;
+    row.classList.add("is-dragging");
+    const transfer = event ? event.dataTransfer : null;
+    if (transfer) {
+      if (typeof transfer.setData === "function") transfer.setData("text/plain", String(item.tag || ""));
+      if (typeof transfer.setDragImage === "function") transfer.setDragImage(row, 8, 8);
+    }
+  }
+
+  function endDrag() {
+    dragging = null;
+    if (draggingAdd && draggingAdd.row) draggingAdd.row.classList.remove("is-dragging");
+    draggingAdd = null;
+    clearDropTarget();
+    for (const entry of rowNodes) entry.row.classList.remove("is-dragging");
+  }
+
+  /** Move a row one position inside its own container. Returns nothing; the middle never moves. */
+  function moveWithinBucket(index, delta) {
+    const name = bucketOf(index);
+    if (name === null || name === "middle") return;
+    const list = orderBuckets[name];
+    const at = list.indexOf(index);
+    const next = at + delta;
+    if (at < 0 || next < 0 || next >= list.length) return;
+    list.splice(at, 1);
+    list.splice(next, 0, index);
+    layoutBuckets();
+    invalidatePreview();
+  }
+
+  /**
+   * The keyboard's half of the reorder, which is the same three containers the mouse has:
+   * ↑/↓ move a row inside its container, Home puts it at the very front and End at the very end.
+   * A control that only a mouse can reach would be a dead end for everyone else.
+   *
+   * Home/End target the *containers*, not a position: with one image in scope there is only one
+   * container, so both mean "the first / the last row of it" - the hidden containers must never
+   * become a place a row can be sent to.
+   */
+  function onGripKey(index, event) {
+    const key = event ? event.key : "";
+    let target = null;
+    let before = -1;
+    if (key === "ArrowUp" || key === "ArrowDown") {
+      moveWithinBucket(index, key === "ArrowUp" ? -1 : 1);
+    } else if (key === "Home") {
+      target = "front";
+      before = (orderBuckets.front || [])[0];
+    } else if (key === "End") {
+      target = reorderSingle ? "front" : "back";
+      before = -1;
+    } else {
+      return;
+    }
+    if (target !== null && moveRowIn(orderBuckets, index, target, before === undefined ? -1 : before)) {
+      layoutBuckets();
+      invalidatePreview();
+    }
+    if (typeof event.preventDefault === "function") event.preventDefault();
+  }
+
+  /** The per-row names, painted from the held row list so a language switch reaches them too. */
+  function paintRowTools() {
+    rowNodes.forEach((entry, index) => {
+      const tag = String(commonOriginal[index] === undefined ? "" : commonOriginal[index]);
+      entry.grip.title = t("batch.dragHandle", { tag });
+      entry.grip.setAttribute("aria-label", t("batch.dragHandle", { tag }));
+      entry.remove.title = t("caption.remove");
+      entry.remove.setAttribute("aria-label", t("caption.remove") + " " + tag);
+    });
+  }
+
+  /**
+   * Which nothing the containers are empty for. `rowCount` is passed in rather than read from
+   * `commonRows`, because the call happens *before* the rows of the next paint are built.
+   */
+  function paintEmptyNote(rowCount) {
+    commonNone.textContent = t(scopeImageCount === 0 ? "batch.commonNoneImages" : "batch.commonNone");
+    commonNone.hidden = rowCount > 0;
   }
 
   function paintCommonRows(tags) {
     commonRows = [];
-    commonList.replaceChildren();
-    commonNone.hidden = tags.length > 0;
-    if (tags.length === 0) return;
-    const frag = document.createDocumentFragment();
+    rowNodes = [];
+    for (const name of ORDER_BUCKETS) bucketRows[name].replaceChildren();
+    commonNote.replaceChildren();
+    // The container host stays on screen even with nothing in it. It used to be hidden whenever the
+    // scope had no common tags, which is the ordinary state (a few images with different captions
+    // share nothing) - and then the whole manual-order feature had no entrance at all: nothing on
+    // screen said it existed. An empty container plus the line that says *why* it is empty is the
+    // honest version of "there is nothing to order here".
+    orderHost.hidden = false;
+    orderHint.hidden = tags.length === 0;
+    paintEmptyNote(tags.length);
+    if (tags.length === 0) {
+      orderBuckets = emptyBuckets();
+      layoutBuckets();
+      return;
+    }
     for (const tag of tags.slice(0, COMMON_ROWS)) {
+      const index = commonRows.length;
       const row = make("div", "batch-common-row");
+      const grip = make("span", "batch-grip", "\u28ff");
+      grip.setAttribute("role", "button");
+      grip.tabIndex = 0;
+      grip.draggable = true;
       const input = textInput("batch-common-input");
       input.value = tag;
       input.dataset.original = tag;
@@ -446,19 +1042,28 @@ export function createBatchPanel(options) {
         invalidatePreview();
       });
       const remove = button("btn btn-mini batch-common-remove", "\u00d7");
-      remove.title = t("caption.remove");
       remove.addEventListener("click", () => {
         input.value = "";
         input.classList.add("is-removed");
         invalidatePreview();
       });
-      row.append(input, remove);
+      grip.addEventListener("dragstart", (event) => { startDrag(index, row, event); });
+      grip.addEventListener("dragend", () => { endDrag(); });
+      grip.addEventListener("keydown", (event) => { onGripKey(index, event); });
+      row.append(grip, input, remove);
       commonRows.push(input);
-      frag.append(row);
+      rowNodes.push({ row, grip, input, remove });
     }
-    commonList.append(frag);
+    // The starting containers: a single image's own order in one container, a multi-image scope
+    // with everything in the middle (nothing has been moved yet, so nothing will be sent).
+    const all = rowNodes.map((entry, index) => index);
+    orderBuckets = reorderSingle
+      ? { front: all, middle: [], back: [] }
+      : { front: [], middle: all, back: [] };
+    layoutBuckets();
+    paintRowTools();
     if (tags.length > COMMON_ROWS) {
-      commonList.append(make("p", "hint", t("batch.commonMore", { n: tags.length - COMMON_ROWS })));
+      commonNote.append(make("p", "hint", t("batch.commonMore", { n: tags.length - COMMON_ROWS })));
     }
   }
 
@@ -487,8 +1092,10 @@ export function createBatchPanel(options) {
 
   function paintSections() {
     const op = currentOp();
+    // A field of the section that just closed must not keep a dropdown open over
+    // the section that just opened.
+    for (const suggest of tagSuggests) suggest.close();
     commonSection.hidden = op !== BATCH_COMMON;
-    tagsSection.hidden = ![BATCH_OP.APPEND, BATCH_OP.PREPEND, BATCH_OP.REMOVE].includes(op);
     replaceSection.hidden = op !== BATCH_OP.REPLACE;
     regexSection.hidden = ![BATCH_OP.REGEX_REPLACE, BATCH_OP.REGEX_REPLACE_TEXT].includes(op);
   }
@@ -513,18 +1120,35 @@ export function createBatchPanel(options) {
     const sig = info.paths.join("\n");
     const changedScope = sig !== lastSig;
     const becameReady = info.missing === 0 && lastMissing > 0;
+    // One image in scope is a different editor from several: its own tag order is what a reorder can
+    // change, while a multi-image scope can only say "these first / these last" (the middle keeps
+    // every caption's own order). A scope that grew or shrank therefore rebuilds the rows even when
+    // the tag list happens to look the same.
+    const single = info.paths.length === 1;
+    const modeChanged = single !== reorderSingle;
+    reorderSingle = single;
+    scopeImageCount = info.paths.length;
+    // The tag fields suggest from these lists; rebuilding here keeps them as
+    // fresh as the common-tag rows, and a keystroke still costs no rebuild.
+    scopeTagIndex = buildScopeTagIndex(info.lists);
+    scopeTagMissing = info.missing;
     lastMissing = info.missing;
     lastSig = sig;
     pendingNote.hidden = info.missing === 0;
+    // Ask the app for the captions this scope needs. Nothing else does it for images outside the
+    // directory on screen, and the common-tag editor has nothing to show until they arrive.
+    if (info.missing > 0) requestCaptions(info.paths);
     if (currentOp() === BATCH_COMMON) {
       if (info.missing > 0) {
         if (changedScope) { commonOriginal = []; paintCommonRows([]); }
-      } else if (changedScope || becameReady) {
-        commonOriginal = commonTags(info.lists);
+      } else if (changedScope || becameReady || modeChanged) {
+        // A single image needs its **own** order (the caption's), not the alphabetical intersection:
+        // the whole point of the single container is to show the order that is on disk.
+        commonOriginal = single ? (info.lists[0] || []).slice() : commonTags(info.lists);
         paintCommonRows(commonOriginal);
       }
     }
-    if (changedScope || becameReady) invalidatePreview();
+    if (changedScope || becameReady || modeChanged) invalidatePreview();
     refreshButtons();
   }
 
@@ -550,21 +1174,19 @@ export function createBatchPanel(options) {
     const base = { images: paths, op: requestOp(op), backup: backupCheck.checked };
     if (op === BATCH_COMMON) {
       const values = commonRows.map((input) => input.value);
-      const edit = commonEdit(commonOriginal, values, addedTags);
-      if (edit.pairs.length === 0 && edit.tags.length === 0) {
+      const edit = commonEdit(commonOriginal, values);
+      // The order half is empty unless the user really moved a row (orderEdit explains both cases).
+      const order = orderEdit(orderBuckets, values, reorderSingle);
+      // The two container add rows are additions, and each names its own block.
+      const added = blockAdditions(addedTags, commonOriginal);
+      const nothing = edit.pairs.length === 0
+        && !added.tags_first && !added.tags_last
+        && !order.order_first && !order.order_last;
+      if (nothing) {
         notify(t("batch.noChange"), "warn");
         return null;
       }
-      return Object.assign(base, {
-        pairs: edit.pairs,
-        tags: edit.tags,
-        position: commonPrepend.checked ? "prepend" : "append",
-      });
-    }
-    if (op === BATCH_OP.APPEND || op === BATCH_OP.PREPEND || op === BATCH_OP.REMOVE) {
-      const tags = splitTagInput(tagsInput.value);
-      if (tags.length === 0) { notify(t("batch.missingParam"), "warn"); return null; }
-      return Object.assign(base, { tags });
+      return Object.assign(base, { pairs: edit.pairs }, added, order);
     }
     if (op === BATCH_OP.REPLACE) {
       const find = findInput.value.trim();
@@ -902,10 +1524,10 @@ export function createBatchPanel(options) {
   }
 
   // ---- wiring -----------------------------------------------------------
-  for (const input of [tagsInput, findInput, replaceInput, patternInput, replacementInput, commonAddInput]) {
+  for (const input of [findInput, replaceInput, patternInput, replacementInput]) {
     input.addEventListener("input", invalidatePreview);
   }
-  for (const box of [replaceIgnoreCase, regexIgnoreCase, commonPrepend]) {
+  for (const box of [replaceIgnoreCase, regexIgnoreCase]) {
     box.addEventListener("change", invalidatePreview);
   }
   /**
@@ -931,12 +1553,6 @@ export function createBatchPanel(options) {
     }
   }
   cancelButton.addEventListener("click", () => { void cancelWrite(); });
-  commonAddButton.addEventListener("click", addCommonTag);
-  commonAddInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    addCommonTag();
-  });
   opSelect.addEventListener("change", () => {
     paintSections();
     invalidatePreview();
@@ -957,6 +1573,12 @@ export function createBatchPanel(options) {
   function relabel() {
     paintLabels();
     paintAdded();
+    // The rows' own names (the grip's "drag to reorder <tag>" and the remove button's) are painted
+    // with t() when a row is built, so a language switch has to repaint them from the held list -
+    // without rebuilding the rows, which would throw away the order the user arranged.
+    paintRowTools();
+    // The empty state's wording depends on the scope and the rows, which are held state too.
+    paintEmptyNote(commonRows.length);
   }
 
   return {

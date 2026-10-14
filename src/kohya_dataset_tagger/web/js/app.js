@@ -229,6 +229,11 @@ const gallery = createGallery({
     else if (info.count === 1) el.textContent = t("gallery.selectionOne");
     else el.textContent = t("gallery.selectionMany", { n: info.count });
     autotagPanel.refreshScopes();
+    // The batch panel reads the **same** control, and a new selection changes the images behind it
+    // without changing the select's value - so nothing else would tell it. Without this its common-tag
+    // containers kept describing the selection the panel was last built for (at boot: none at all,
+    // which is what "the containers start out without the common tags" looked like).
+    batchPanel.refreshScope();
     // Selection is one of the filter layers, so a selection change can change
     // what the gallery shows - but only while "selection only" is on.
     if (filterPanel.hasSelectionFilter()) applyFilter();
@@ -383,6 +388,9 @@ const batchPanel = createBatchPanel({
   // A scope can cover images whose captions were never probed (the visible set is probed
   // only when a filter is on), and the common-tag editor needs their tag lists.
   onScopeChange: () => { void ensureProbed(); },
+  // ...and it can reach outside the directory on screen (subdirectories, a selection), which
+  // ensureProbed() never covers: the panel hands over the images it is looking at.
+  requestCaptions: (paths) => { void probeScopeCaptions(paths); },
   getTags: (path) => {
     const info = captionInfo.get(path);
     return info && Array.isArray(info.tags) ? info.tags : null;
@@ -638,6 +646,42 @@ async function ensureProbed() {
   if (probedToken === token) return null;
   probedToken = token;
   return probeCaptions(state.images, token);
+}
+
+//: Paths a **scope** probe is asking for right now. Only in flight, never a memory: "is this caption
+//: known" is `captionInfo`'s job, and it is cleared on navigation and after a write - a second
+//: "already asked" set would go stale in exactly those moments and leave the panel empty forever.
+const scopeProbing = new Set();
+
+/**
+ * Read the captions of the images a panel is about to act on, when they are not known yet.
+ *
+ * `ensureProbed()` covers the directory on screen, which is what the gallery and the filter need. A
+ * scope can reach further: "current directory + subdirectories" is a whole tree, and a selection can
+ * name images the gallery has not read. The batch panel's common-tag editor cannot compute anything
+ * without those tag lists - it used to sit on its "reading caption…" note with empty containers
+ * **forever**, because nothing ever asked for the images outside the open directory (reported
+ * 2026-10-13 as "the containers start out without the common tags"). A panel asks for exactly the
+ * images it is looking at; a path already in flight is not asked for twice, and a failed chunk is
+ * remembered by `captionInfo` as a failure, like the listing probe.
+ */
+async function probeScopeCaptions(paths) {
+  const wanted = [];
+  for (const path of paths || []) {
+    if (captionInfo.has(path) || scopeProbing.has(path)) continue;
+    scopeProbing.add(path);
+    wanted.push({ path, hasCaption: null });
+  }
+  if (wanted.length === 0) return 0;
+  try {
+    await probeCaptions(wanted, state.openToken);
+  } finally {
+    for (const item of wanted) scopeProbing.delete(item.path);
+  }
+  // The chunks inside probeCaptions() already re-apply the filter (which repaints the batch panel);
+  // this is the "nothing left to read" pass, so a panel that just became complete sees it.
+  applyFilter();
+  return wanted.length;
 }
 
 async function probeCaptions(images, token) {
@@ -983,6 +1027,9 @@ function renderBreadcrumb() {
     });
   }
   $("btn-parent").disabled = !state.parent;
+  // Section 4.18's action is about the directory on screen, so it is greyed out exactly while there
+  // is none - the same question, painted in the one function that runs on every navigation.
+  $("btn-open-folder").disabled = !state.dir;
 }
 
 function renderCounts(counts, recursive) {
@@ -2393,6 +2440,7 @@ const REASON = Object.freeze({
 
 //: Each of these answers "why not?" with a REASON when it applies, and null when it does not.
 const whyNoParent = () => (state.parent ? null : (state.dir ? REASON.atRoot : REASON.noDir));
+const whyNoDir = () => (state.dir ? null : REASON.noDir);
 const whyNoImages = () => (gallery.getVisiblePaths().length > 0 ? null : REASON.noImages);
 const whyNoSelection = () => (gallery.getSelectedPaths().length > 0 ? null : REASON.noSelection);
 const whyNoFilter = () => (filterPanel.hasFilter() ? null : REASON.noFilter);
@@ -2584,6 +2632,14 @@ const commands = [
     control: "btn-parent",
     run: () => goToParent(),
     available: gate("btn-parent", whyNoParent),
+  },
+  {
+    id: "browse.openFolder",
+    group: "browse",
+    labelKey: "gallery.openFolder",
+    control: "btn-open-folder",
+    run: () => openInFileManager(),
+    available: gate("btn-open-folder", whyNoDir),
   },
   {
     id: "browse.pickDataset",
@@ -2860,8 +2916,27 @@ function goToParent() {
   if (state.parent) void openDir(state.parent, state.rootName);
 }
 
+/**
+ * Section 4.18: show the directory on screen in the operating system's file manager.
+ *
+ * The app owns the dataset but not the desktop: this is the one action that leaves the page, and it
+ * is the only way to get from "the caption of this image" to "the folder the trainer will read".
+ * A failure is reported rather than swallowed - a headless server has no launcher at all, and the
+ * user has to be told that instead of watching a button that appears to do nothing. Named for the
+ * same reason as refreshBrowse: the palette's entry must call this very function.
+ */
+async function openInFileManager() {
+  if (!state.dir) return;
+  try {
+    await api.revealDir(state.dir);
+  } catch (err) {
+    notify(t("gallery.openFolderFailed", { message: describeError(err) }), "error");
+  }
+}
+
 function setupToolbar() {
   $("btn-refresh").addEventListener("click", refreshBrowse);
+  $("btn-open-folder").addEventListener("click", openInFileManager);
   $("btn-parent").addEventListener("click", goToParent);
   $("btn-palette").addEventListener("click", () => { openPalette(); });
   $("btn-select-all").addEventListener("click", () => gallery.selectAll());
@@ -2966,6 +3041,10 @@ async function relabelAfterLocaleChange() {
   // and relabel() is a pure redraw from the query it already holds.
   palette.relabel();
   renderCacheList();
+  // The picker's copy is all construction-time (one dialog, built at module scope, which can be open
+  // across a switch) - the same reason the panels above are registered. Its own relabel() repaints
+  // the listing's row tooltips as well, so nothing in the dialog is left in the old language.
+  relabelComponent(picker);
   applyPickerAvailability();
   const active = document.querySelector(".tab.is-active");
   const tab = active ? active.dataset.tab : "";

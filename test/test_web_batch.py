@@ -68,17 +68,30 @@ def frontend_ops() -> set[str]:
     return set(re.findall(r':\s*"([a-z_]+)"', match.group(1)))
 
 
-def test_backend_and_frontend_op_sets_are_identical() -> None:
-    """One missing value = the op the frontend sends gets a 400 (bad_op) from the backend, and only after the user has clicked write."""
+def test_every_frontend_op_is_one_the_backend_knows() -> None:
+    """One missing value = the op the frontend sends gets a 400 (bad_op) from the backend, and only
+    after the user has clicked write.
+
+    The check is **one-directional since 2026-10-13**: the panel dropped `append` / `prepend` /
+    `remove` (its common-tag editor covers them - two container add rows, clearing a row, and the
+    replace op with an empty replacement), while the endpoint keeps them as its primitive set. A
+    frontend op the backend does not know is the failure this criterion exists for; a backend op no
+    screen offers is reported by the route/paragraph tests, not failed here.
+    """
     backend = backend_ops()
     frontend = frontend_ops()
     assert len(backend) >= 8, "only %d ops parsed out of the backend; the parsing is probably broken" % len(backend)
-    assert backend == frontend, (
-        "the batch op sets on the two sides differ: backend-only=%s, frontend-only=%s"
-        % (sorted(backend - frontend), sorted(frontend - backend))
-    )
-    for op in ("prepend", "edit_tags", "regex_replace_text"):
-        assert op in backend, "BATCH_OPS is missing %s" % op
+    unknown = sorted(frontend - backend)
+    assert not unknown, "api.js names ops the backend does not accept: %s" % unknown
+    assert frontend, "no ops parsed out of api.js"
+    for op in ("edit_tags", "replace", "regex_replace_text", "normalize", "sort_danbooru"):
+        assert op in frontend, "BATCH_OP is missing %s" % op
+    for op in ("prepend", "append", "remove"):
+        assert op in backend, "the endpoint's primitive set lost %s" % op
+        assert op not in frontend, (
+            "%s is offered by the panel again, though the common-tag editor covers it (see the "
+            "docstring of BATCH_OP in api.js)" % op
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +196,250 @@ def test_the_common_editor_maps_to_the_real_backend_op() -> None:
     assert "export const BATCH_COMMON" in body, "the local pseudo-op constant is gone"
 
 
+def test_the_common_editor_is_also_the_manual_order_editor() -> None:
+    """The manual reorder ("drag the common tags into the order the trainer should read").
+
+    One image in scope is **one** container - that caption's own order is the answer, so the panel
+    shows the order on disk rather than the alphabetical intersection - and several images are the
+    front / middle / back containers of §4.5 ③'s two order blocks. The rows are the very rows the
+    rename/delete editor uses: a separate list of the same tags would be two live copies.
+    """
+    body = text_of(BATCH)
+    assert 'export const ORDER_BUCKETS = ["front", "middle", "back"];' in body, "the three containers are gone"
+    assert 'make("section", "batch-bucket")' in body, "the containers are not built at all"
+    assert "bucket.dataset.bucket = name;" in body, "a container carries no name for its own drop target"
+    assert 'bucketRows[name].replaceChildren(...orderBuckets[name]' in body, (
+        "the containers are not painted from the order state"
+    )
+    assert 'orderHost.classList.toggle("is-single", reorderSingle);' in body, (
+        "nothing switches between the one-container and the three-container layout"
+    )
+    assert "info.lists[0]" in body, (
+        "a single-image scope does not use that caption's own order (the alphabetical intersection "
+        "is the wrong list to reorder)"
+    )
+    assert "orderEdit(orderBuckets, values, reorderSingle)" in body, (
+        "the arranged order never reaches the request"
+    )
+    assert "Object.assign(base, { pairs: edit.pairs }, added, order)" in body, (
+        "the order blocks and the container additions are not merged into the edit_tags body"
+    )
+    assert "const nothing = edit.pairs.length === 0" in body, (
+        "a moved row or an added tag is not part of the 'nothing changed' check: pressing preview "
+        "after a pure drag would report 'no changes' instead of showing the new order"
+    )
+    assert "&& !added.tags_first && !added.tags_last" in body, (
+        "an empty addition block counts as a change: every preview of an untouched editor would go out"
+    )
+    assert "&& !order.order_first && !order.order_last;" in body, (
+        "an empty order block counts as a change: every preview of an untouched editor would go out"
+    )
+
+
+def test_the_order_editor_is_drag_and_keyboard_reachable() -> None:
+    """A drag-only control is a dead end for everyone who does not use a mouse."""
+    body = text_of(BATCH)
+    assert "grip.draggable = true;" in body, "the rows cannot be dragged"
+    assert 'grip.addEventListener("dragstart"' in body, "a drag never starts"
+    assert 'bucket.addEventListener("drop"' in body, "the containers are not drop targets"
+    assert "rowIndexUnder(event.target, bucket)" in body, (
+        "a drop does not ask which row it landed on, so every drop would append"
+    )
+    assert 'grip.addEventListener("keydown"' in body, "the keyboard cannot reach the order"
+    for key in ('key === "ArrowUp" || key === "ArrowDown"', 'key === "Home"', 'key === "End"'):
+        assert key in body, "the keyboard path lost %s" % key
+    assert 'reorderSingle ? "front" : "back"' in body, (
+        "End sends a row into the hidden end container of the single-image layout"
+    )
+    assert 't("batch.dragHandle", { tag })' in body, "the grip has no accessible name"
+
+
+def test_the_two_order_containers_are_named_prefix_and_suffix() -> None:
+    """The user (2026-10-13): 前置和后置's English "不太通行，我见的比较多的写法的 prefix 和 suffix".
+
+    The pair is the domain's own wording, and it has to be the *pair* in every pack that names it -
+    including the two hints and the section hint, which used to spell the containers out again. The
+    tagger's own write modes keep Append / Prepend: those are verbs about inserting tags, not the two
+    places a caption can hold them.
+    """
+    names = {}
+    for pack in ("zh-CN", "en", "ja"):
+        text = text_of(JS / "locales" / (pack + ".js"))
+        found = {}
+        for key in ("batch.orderFront", "batch.orderMiddle", "batch.orderBack",
+                    "batch.orderHintSingle", "batch.orderHintMulti", "batch.commonHint"):
+            match = re.search(r'"%s":\s*"([^"]+)"' % re.escape(key), text)
+            assert match, "%s is missing from %s.js" % (key, pack)
+            found[key] = match.group(1)
+        names[pack] = found
+    assert names["zh-CN"]["batch.orderFront"] == "前置", "the Chinese container name changed"
+    assert names["zh-CN"]["batch.orderBack"] == "后置", "the Chinese container name changed"
+    assert names["en"]["batch.orderFront"] == "Prefix", (
+        "the English front container is not Prefix (the wording the user actually sees in this domain)"
+    )
+    assert names["en"]["batch.orderBack"] == "Suffix", "the English end container is not Suffix"
+    assert names["ja"]["batch.orderFront"] == "プレフィックス", "the Japanese pack does not follow the pair"
+    assert names["ja"]["batch.orderBack"] == "サフィックス", "the Japanese pack does not follow the pair"
+    for pack, keys in names.items():
+        for key in ("batch.orderHintSingle", "batch.orderHintMulti", "batch.commonHint"):
+            for stale in ("Prepend", "Append", "先頭へ", "末尾へ"):
+                assert stale not in keys[key], (
+                    "%s's %s still calls the containers %r while the titles say Prefix / Suffix"
+                    % (pack, key, stale)
+                )
+
+
+def test_the_order_containers_state_their_own_meaning() -> None:
+    """Copy and CSS for the containers: the middle is inert, and the single layout closes the rest."""
+    keys = text_of(STRINGS)
+    for key in ("batch.orderSingle", "batch.orderFront", "batch.orderMiddle", "batch.orderBack",
+                "batch.orderHintSingle", "batch.orderHintMulti", "batch.dragHandle"):
+        assert '"%s"' % key in keys, "strings.js is missing %s" % key
+    assert "{tag}" in keys, "the grip's accessible name has no {tag} placeholder"
+    # The hint above the section is the only copy that is on screen whatever the scope holds, so the
+    # handle has to be named there: the report that produced this criterion was "where is the entrance?".
+    hint = re.search(r'"batch\.commonHint":\s*"([^"]+)"', keys)
+    assert hint and "手柄" in hint.group(1), (
+        "batch.commonHint does not tell the user that the row has a drag handle"
+    )
+    # The single-image layout closes two of the three containers, so its hint has to say where they
+    # went - otherwise their absence reads as a bug (the report it came from: "前置和后置不见了").
+    single = re.search(r'"batch\.orderHintSingle":\s*"([^"]+)"', keys)
+    assert single and "前置" in single.group(1) and "后置" in single.group(1), (
+        "the single-image hint does not say that the other two containers appear with several images"
+    )
+    css = text_of(CSS)
+    assert '.batch-order.is-single .batch-bucket[data-bucket="middle"]' in css, (
+        "the single-image layout does not close the middle container"
+    )
+    assert '.batch-order.is-single .batch-bucket[data-bucket="back"]' in css, (
+        "the single-image layout does not close the end container"
+    )
+    assert ".batch-bucket.is-drop-target" in css, "the container under the pointer has no marker"
+    assert ".batch-grip" in css, "the drag handle has no style of its own"
+    # The two drop targets share the top row and 维持 gets its own row below (the harness pins the DOM
+    # order; this pins the CSS that makes it a row, and the stickiness that keeps the targets reachable
+    # while the long 维持 list is scrolled - the user's own reason: "otherwise dragging is torture").
+    assert 'if (name === "middle") orderHost.append(bucket);' in text_of(BATCH), (
+        "the containers are appended in one flat list again"
+    )
+    assert ".batch-order-top {" in css and "position: sticky;" in css, (
+        "the row with the two drop targets is not pinned, so scrolling 维持 takes them off screen"
+    )
+    assert ".batch-order-top .batch-bucket { flex: 1 1 0; min-width: 0; }" in css, (
+        "前置 and 后置 do not share the top row"
+    )
+    bucket_rule = re.search(r"^\.batch-bucket \{(.*?)\}", css, re.S | re.M)
+    assert bucket_rule and "border: 1px solid var(--line);" in bucket_rule.group(1), (
+        "the containers have no visible border: three unoutlined groups of rows read as one flat list, "
+        "and the point of the containers is that their contents mean different things"
+    )
+    # The user: "这个新增的按钮和列表之间的间距要和列表元素间的间距一致". One value, declared once, used by
+    # the container (which spaces its blocks) and by the two lists (which space their rows) - measured in
+    # real Chrome over the panel's own DOM shape: row/row, addition/row, list/+ are all 4px.
+    assert "--batch-row-gap: 4px" in css, "there is no single spacing value for the editor"
+    assert css.count("var(--batch-row-gap)") >= 3, (
+        "the + is not spaced by the same value the rows use (a margin of its own drifts apart from it)"
+    )
+    assert "margin-top: 3px" not in css, (
+        "the add row carries a margin again instead of being spaced by its container"
+    )
+    assert ".batch-bucket-rows, .batch-bucket-added { flex: 0 0 auto; }" in css, (
+        "a list can be squashed to its 22px floor again, with its rows overflowing it invisibly"
+    )
+    assert ".batch-bucket-rows:empty { display: none; }" in css, (
+        "an empty list occupies space again, so the gap above the + is not the row gap (it was 30px)"
+    )
+    assert css.count("max-height: 20vh;") == 1 and "max-height: 40vh;" in css, (
+        "the top row is not capped at half the editor's own height (40vh): a 前置 filled with tags "
+        "would leave no room for the list you are dragging out of"
+    )
+    # The report this came from: "前置和后置的容器丢了" - a screenshot with 维持 full of rows and no top
+    # row at all. A flex item with `overflow: auto` loses its automatic minimum size, so the default
+    # `flex-shrink: 1` let the overflowing middle squash the pinned row flat. Measured in real Chrome
+    # over the panel's own DOM shape (48 rows, 1280x900): `flex: 1 1 auto` gives the top row **0 px**
+    # and the two containers 6 px; `flex: 0 0 auto` gives it 97 px. The committed layout probe cannot
+    # reach this state - its canned captions share two tags, so the editor never overflows there.
+    top_rule = re.search(r"\.batch-order-top \{(.*?)\}", css, re.S)
+    assert top_rule and "flex: 0 0 auto;" in top_rule.group(1), (
+        "the pinned row is shrinkable again: the overflowing middle list squashes it to zero height"
+    )
+    assert ".batch-order > .batch-bucket { flex: 0 0 auto; }" in css, (
+        "the middle container is shrinkable: the long list would be squeezed instead of scrolling"
+    )
+
+
+def test_the_panel_asks_for_the_captions_its_scope_needs() -> None:
+    """A scope can reach outside the directory on screen ("current directory + subdirectories", a
+    selection), and the gallery only ever probes the listing on screen - so the panel has to ask for
+    the captions it cannot compute without, or the common-tag containers stay empty **forever** on
+    their "reading caption…" note. That is the report this criterion came from: "the containers start
+    out without the common tags".
+
+    The behaviour half (the panel really asks, and only once per scope while the answer is in flight)
+    lives in `test/fixtures/batch_harness.mjs`.
+    """
+    batch = text_of(BATCH)
+    assert "config.requestCaptions" in batch, "the panel ignores the app's caption reader"
+    assert "if (info.missing > 0) requestCaptions(info.paths);" in batch, (
+        "the panel never asks for the captions it cannot compute without"
+    )
+    app = text_of(APP)
+    assert "async function probeScopeCaptions(paths)" in app, "app.js has no scope probe"
+    assert "requestCaptions: (paths) => { void probeScopeCaptions(paths); }," in app, (
+        "app.js does not hand the batch panel a way to read its scope's captions"
+    )
+    assert "scopeProbing" in app and "captionInfo.has(path)" in app, (
+        "the scope probe does not skip the captions already known (or already in flight), so it would "
+        "re-request them on every repaint"
+    )
+    probe = app[app.index("async function probeScopeCaptions(paths)"):][:1600]
+    assert "applyFilter();" in probe, (
+        "the scope probe never repaints the panels that were waiting for it"
+    )
+
+
+def test_the_panel_follows_the_gallery_selection() -> None:
+    """The scope select does not change when the user picks images, so `onChange` never fires.
+
+    A selection change is a change of "which images" for this panel without any visible control
+    moving, and the readout in the toolbar was the only thing that followed it. The batch panel kept
+    describing the selection it was last built for - at boot, no images at all - which is what the
+    screenshot showed as six selected images above three empty containers and a "no images" note.
+
+    Two halves, because either alone is not enough: app.js has to tell the panel (this criterion),
+    and the panel has to notice a provider change that arrives through a repaint (the harness'
+    section 15.8, which calls `scope.paint()` the way the selection handler does).
+    """
+    app = text_of(APP)
+    assert "autotagPanel.refreshScopes();" in app and "batchPanel.refreshScope();" in app, (
+        "the selection handler still refreshes only the tagger: the batch panel keeps the old selection"
+    )
+    assert app.index("autotagPanel.refreshScopes();") < app.index("batchPanel.refreshScope();") < app.index(
+        "if (filterPanel.hasSelectionFilter()) applyFilter();"
+    ), "the batch panel is not refreshed inside onSelectionChange"
+    batch = text_of(BATCH)
+    assert "function onScopePaint()" in batch, "the panel does not react to a repaint of the control"
+    assert 'if (scope.paths().join("\\n") === lastSig) return;' in batch, (
+        "a repaint recomputes the scope even when the paths did not change (or never recomputes it)"
+    )
+    assert "refreshingScope" in batch, (
+        "no re-entrancy guard: refreshScope repaints the control, which notifies onPaint again"
+    )
+
+
+def test_the_empty_common_editor_says_which_nothing_it_is() -> None:
+    """"no images in the scope" and "these images share no tag" are different facts with different next
+    steps; one key for both made the second read like a broken feature (and the first one unanswerable)."""
+    batch = text_of(BATCH)
+    assert 't(scopeImageCount === 0 ? "batch.commonNoneImages" : "batch.commonNone")' in batch, (
+        "the empty state does not distinguish an empty scope from a scope whose tags all differ"
+    )
+    keys = text_of(STRINGS)
+    for key in ("batch.commonNone", "batch.commonNoneImages"):
+        assert '"%s"' % key in keys, "strings.js is missing %s" % key
+
+
 def test_common_tag_editor_is_a_row_list_not_a_text_box() -> None:
     """A row list is what stops "delete row 3 -> the next two rows each lose a tag" from happening."""
     body = text_of(BATCH)
@@ -209,6 +466,12 @@ def test_strings_js_has_the_batch_copy() -> None:
         "batch.undone",
         "batch.undoPartial",
         "batch.undoFailed",
+        "batch.orderSingle",
+        "batch.orderFront",
+        "batch.orderMiddle",
+        "batch.orderBack",
+        "batch.orderHintSingle",
+        "batch.orderHintMulti",
     ):
         assert '"%s"' % key in keys, "strings.js is missing %s" % key
 
@@ -218,6 +481,154 @@ def test_batch_css_marks_a_row_that_is_being_removed() -> None:
     assert ".batch-common-row" in css, "the row list has no layout rule"
     assert ".batch-common-input.is-removed" in css, "a cleared row has no visual marker (the user cannot tell it will be deleted)"
     assert "line-through" in css, "a cleared row has no strikethrough"
+    # The shared `.suggest-wrap` grows (`flex: 1 1 auto`, which the caption editor's input row
+    # wants); in the batch panel's flex row that made the wrapper wider than the field it drops
+    # from (measured in headless Chrome: a 160px input inside a 271px wrapper). The rule that
+    # holds the two together is worth pinning, because its absence is invisible in a fake DOM.
+    assert ".batch-section .suggest-wrap { flex: 0 1 auto; min-width: 0; }" in css, (
+        "the batch tag field's dropdown is not tied to the width of the field it drops from"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2b. Autocomplete: one shared dropdown, the scope's tags first
+# ---------------------------------------------------------------------------
+
+SUGGEST = JS / "suggest.js"
+#: the tag fields this panel builds; the regex fields are deliberately not among them
+TAG_FIELDS = (
+    'const findField = tagField(null, { mode: "dataset" });',
+    "const replaceField = tagField(null);",
+)
+SUGGEST_TAGS_RE = re.compile(r"async function suggestTags\([^)]*\)\s*\{(.*?)\n  \}", re.S)
+TAG_FIELD_RE = re.compile(r"const tagField = \([^)]*\)\s*=>\s*\{(.*?)\n  \};", re.S)
+
+
+def test_tag_fields_use_the_shared_autocomplete() -> None:
+    """The report: "批量 tag 编辑这边怎么不支持自动补全".
+
+    The behaviour was there all along, inside the per-image editor, where this panel could not
+    reach it. It is one module now (`suggest.js`), used by both surfaces, and this panel's tag fields
+    go through `tagField`. The two regex fields stay plain inputs: a regular expression is not a tag,
+    and a dropdown over one would offer tags nobody asked for.
+    """
+    batch = text_of(BATCH)
+    assert 'from "./suggest.js"' in batch, "the batch panel does not use the shared autocomplete"
+    for site in TAG_FIELDS:
+        assert site in batch, "a tag field lost its autocomplete: %s is gone" % site
+    assert "const patternInput = textInput();" in batch, "the regex pattern field grew a tag dropdown"
+    assert "const replacementInput = textInput();" in batch, "the regex replacement field grew a tag dropdown"
+    assert "const patternInput = tagField" not in batch and "const replacementInput = tagField" not in batch, (
+        "a regex field is offered tags"
+    )
+    # The common-tag ROWS and the two container add rows stay plain inputs on purpose: they live in a
+    # scrolling box (`overflow: auto`, and the pinned top row needs it too), whose scroll clip cuts an
+    # absolutely positioned dropdown. This is the reason the old single add field sat *outside* it.
+    assert 'textInput("batch-common-input")' in batch, (
+        "the common rows changed shape; if they grew a dropdown, it is clipped by .batch-order"
+    )
+    assert 'textInput("batch-common-input batch-added-input")' in batch, (
+        "the container add rows changed shape; a dropdown inside a scrolling container is clipped"
+    )
+
+def test_suggestions_come_from_the_scope_first_and_the_vocabulary_as_fallback() -> None:
+    """The order is the point: a dataset tag is what replace/find act on, and it costs no request;
+    the WD14 vocabulary is what finds a tag no image carries yet (§4.10, and it answers an empty list
+    when no tagger model is installed - so it can never be the only source)."""
+    match = SUGGEST_TAGS_RE.search(text_of(BATCH))
+    assert match is not None, "the batch panel has no suggestTags source"
+    body = match.group(1)
+    assert "rankSuggestions(" in body, "the panel does not rank the scope's own tags"
+    assert "api.tagAutocomplete(" in body, "the vocabulary fallback is gone"
+    assert body.index("rankSuggestions(") < body.index("api.tagAutocomplete("), (
+        "the vocabulary is consulted before the dataset's own tags"
+    )
+    assert "if (local.length >= limit) return local;" in body, (
+        "a full page of dataset tags still pays for a vocabulary request"
+    )
+    assert "catch (err)" in body and "vocabulary = [];" in body, (
+        "a failed vocabulary request must not empty the dropdown - the dataset half is still an answer"
+    )
+    assert "scopeTagIndex = buildScopeTagIndex(info.lists);" in text_of(BATCH), (
+        "the index is not rebuilt where the scope is re-read"
+    )
+
+
+def test_accepting_a_suggestion_is_an_edit_like_any_other() -> None:
+    """A programmatic value change fires no `input` event, and the wiring that drops a stale
+    preview hangs off exactly that event - so the accept path has to drop it itself."""
+    match = TAG_FIELD_RE.search(text_of(BATCH))
+    assert match is not None, "the panel has no tagField helper"
+    assert "invalidatePreview();" in match.group(1), (
+        "accepting a suggestion leaves a preview of the previous field values armed"
+    )
+    assert 'addEventListener("input", invalidatePreview)' in text_of(BATCH), (
+        "typed edits no longer drop the preview"
+    )
+
+
+def test_find_suggests_from_the_scope_only() -> None:
+    """`find` names a tag the images already carry, so a vocabulary tag they do not carry is a
+    suggestion that cannot be acted on (replace matches zero images). "replace with" may name a tag
+    no image has yet, so it keeps the vocabulary.
+
+    The one exception is a scope whose captions are still being read: the index is incomplete then,
+    and suppressing the vocabulary would suggest nothing at all."""
+    batch = text_of(BATCH)
+    assert 'const findField = tagField(null, { mode: "dataset" });' in batch, (
+        "the find field offers tags nothing in the scope carries"
+    )
+    assert "const replaceField = tagField(null);" in batch, (
+        "the replace-with field is no longer the open one (it may name a new tag)"
+    )
+    match = SUGGEST_TAGS_RE.search(batch)
+    assert match is not None, "the batch panel has no suggestTags source"
+    assert 'if (mode === "dataset" && scopeTagMissing === 0) return local;' in match.group(1), (
+        "the dataset-only mode is not enforced where the candidates are merged"
+    )
+    assert batch.count("scopeTagMissing = info.missing;") == 2, (
+        "the incomplete-probe escape hatch is not kept up to date in both places the scope is read"
+    )
+
+
+def test_the_two_containers_carry_their_own_add_row() -> None:
+    """The panel's add mechanism belongs to the containers (2026-10-13): a new tag is added **into**
+    one of the two blocks, and the request says which. That replaced the single "new tag" field plus
+    the "put new tags at the beginning" checkbox - the container already says where.
+
+    The control is a **permanent, full-width dashed `+`**, and clicking it **appends an element** (the
+    user: "这个虚线框可以常驻，点击的时候以新增一个元素作为实现方法，留空时失焦自动删除"): the element is a
+    row with a grip, a box and a ×, exactly the shape of the tag rows above it, and an element left
+    empty and blurred removes itself. The behaviour half is in `batch_harness.mjs`.
+    """
+    batch = text_of(BATCH)
+    assert 'textInput("batch-common-input batch-added-input")' in batch, (
+        "an addition is not a tag row's box any more"
+    )
+    assert 'make("button", "batch-bucket-add")' in batch, "the containers have no add button"
+    assert 'toggle.textContent' not in batch and 'addButton.textContent = "+";' in batch, (
+        "the closed state is not a + (the user asked for a +, not a labelled button)"
+    )
+    assert "addButton.addEventListener(\"click\", () => { addBucketRow(name); });" in batch, (
+        "clicking the + does not append an element"
+    )
+    assert "if (!tag) {" in batch and "dropAdded(item);" in batch, (
+        "an element left empty is not taken away again"
+    )
+    assert "input.addEventListener(\"blur\", () => { commitAdded(item); });" in batch, (
+        "losing focus is not what settles the new element"
+    )
+    assert "if (name !== \"middle\") {" in batch, (
+        "the middle container grew an add row: an addition has no middle to land in"
+    )
+    assert "blockAdditions(addedTags, commonOriginal)" in batch, (
+        "the container additions are not turned into the request's fields"
+    )
+    assert "commonPrepend" not in batch, "the old shared prepend checkbox is still there"
+    assert "batch-tags-input" not in batch, "the removed three-op tag list field is back"
+    keys = text_of(STRINGS)
+    assert '"batch.addIsCommon"' in keys, "nothing tells the user that a tag is already a common row"
+    assert '"batch.addIsCommon"' in text_of(JS / "locales" / "en.js"), "the warning is not translated"
 
 
 # ---------------------------------------------------------------------------

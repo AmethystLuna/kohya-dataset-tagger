@@ -31,6 +31,50 @@ function describeError(err) {
   return err && err.message ? err.message : String(err);
 }
 
+/**
+ * Split an absolute path into its ancestors, the root first and the path itself last.
+ *
+ * This is what the "current location" row is built from. It is deliberately local to the picker
+ * (navscroll.js owns *scroll* semantics, not path spelling) and it never touches the filesystem: the
+ * server has already resolved the path, so the segments only have to be cut in the same places.
+ *
+ * Handles the four shapes the picker actually sees: `C:\a\b`, `C:/a/b`, `\\server\share\a` and
+ * `/a/b`. Anything else (a relative path, a bare drive letter) comes back as one segment, which
+ * renders as "this is the whole thing" instead of inventing a root that was never there.
+ */
+function pathCrumbs(raw) {
+  const text = String(raw || "");
+  if (!text) return [];
+  const windows = /^[A-Za-z]:[\\/]/.test(text) || text.startsWith("\\\\");
+  const parts = (value) => value.split(/[\\/]+/).filter((part) => part.length > 0 && part !== ".");
+  let root = "";
+  let rest = [];
+  if (windows) {
+    const sep = text.indexOf("\\") >= 0 ? "\\" : "/";
+    if (text.startsWith("\\\\")) {
+      const pieces = parts(text);
+      if (pieces.length < 2) return [{ name: text, path: text }];
+      root = "\\\\" + pieces[0] + sep + pieces[1] + sep;
+      rest = pieces.slice(2);
+    } else {
+      root = text.slice(0, 2) + sep;
+      rest = parts(text.slice(2));
+    }
+  } else if (text.startsWith("/")) {
+    root = "/";
+    rest = parts(text);
+  } else {
+    return [{ name: text, path: text }];
+  }
+  const items = [{ name: root, path: root }];
+  let current = root;
+  for (const part of rest) {
+    current = current.endsWith("/") || current.endsWith("\\") ? current + part : current + (windows ? "\\" : "/") + part;
+    items.push({ name: part, path: current });
+  }
+  return items;
+}
+
 export function createPicker(options) {
   const config = options || {};
   const notify = config.notify || (() => {});
@@ -43,7 +87,9 @@ export function createPicker(options) {
 
   const closeButton = button("btn btn-mini", t("picker.close"));
   const head = el("div", "dialog-head");
-  head.append(el("h2", "panel-title", t("picker.title")), el("span", "spacer"), closeButton);
+  const title = el("h2", "panel-title", t("picker.title"));
+  head.append(title, el("span", "spacer"), closeButton);
+  const hint = el("p", "hint", t("picker.hint"));
 
   // The current path is an editable field, not a label: typing an absolute path
   // and pressing Enter is the manual route (the picker may be the only navigation
@@ -67,6 +113,17 @@ export function createPicker(options) {
   newRow.append(newNameInput, newDirButton);
 
   const jumps = el("div", "picker-jumps");
+  // The current location, read as a breadcrumb right above the listing it describes. The editable
+  // path field at the top holds the same string, but it is a *control* (its value is what "use this
+  // directory" resolves, and it is where a path gets typed): an input also shows its start and hides
+  // its end, and the end is the part that says which directory this is. In an empty directory -
+  // exactly when this was asked for - the listing has nothing to say, so this row is the answer.
+  // Each segment above the last is a button, so several levels up is one click instead of a walk.
+  const locationLabel = el("span", "hint picker-location-label", t("picker.location"));
+  const locationNav = el("nav", "picker-crumbs");
+  locationNav.setAttribute("aria-label", t("picker.location"));
+  const locationRow = el("div", "picker-location-row");
+  locationRow.append(locationLabel, locationNav);
   const list = el("ul", "list picker-list");
   const emptyNote = el("p", "hint", t("picker.empty"));
   emptyNote.hidden = true;
@@ -77,7 +134,7 @@ export function createPicker(options) {
   const actions = el("div", "row");
   actions.append(upButton, el("span", "spacer"), useButton, cancelButton);
 
-  dialog.append(head, el("p", "hint", t("picker.hint")), pathRow, newRow, jumps, list, emptyNote, actions);
+  dialog.append(head, hint, pathRow, newRow, jumps, locationRow, list, emptyNote, actions);
   backdrop.append(dialog);
   document.body.append(backdrop);
 
@@ -88,6 +145,8 @@ export function createPicker(options) {
   let token = 0;
   //: Where focus was before the dialog opened, so it can be handed back.
   let restoreFocusTo = null;
+  //: The listing currently on screen (`{dirs, reveal}`), kept so relabel() can repaint it.
+  let lastListing = { dirs: [], reveal: null };
   // Navigation scroll (see navscroll.js): the listing is rebuilt on every step,
   // so "up one level" has to bring the directory it came out of back into view,
   // and a directory that was already visited keeps the position it was left at.
@@ -152,6 +211,29 @@ export function createPicker(options) {
     }
   }
 
+  /**
+   * Paint the current location as a breadcrumb: every ancestor is a button, the directory itself is
+   * plain text marked `aria-current`. The last segment is deliberately **not** clickable - clicking
+   * where you already are would be a no-op that looks like an action.
+   */
+  function renderLocation(path) {
+    locationNav.replaceChildren();
+    const items = pathCrumbs(path);
+    items.forEach((item, index) => {
+      const isCurrent = index === items.length - 1;
+      let node;
+      if (isCurrent) {
+        node = el("span", "picker-crumb is-current", item.name);
+        node.setAttribute("aria-current", "true");
+      } else {
+        node = button("btn-link picker-crumb", item.name);
+        node.addEventListener("click", () => { void navigate(item.path, { from: currentPath }); });
+      }
+      node.title = item.path;
+      locationNav.append(node);
+    });
+  }
+
   function renderDirs(dirs, revealPath) {
     list.replaceChildren();
     emptyNote.hidden = dirs.length > 0;
@@ -180,10 +262,14 @@ export function createPicker(options) {
     upButton.disabled = parentPath === null;
     useButton.disabled = currentPath.length === 0;
     renderJumps(payload.roots, payload.home);
+    renderLocation(currentPath);
     // A step up (or a jump to an ancestor) shows the directory it came out of;
     // any other step falls back to the position this directory was left at.
     const reveal = from ? childOnPath(currentPath, from) : null;
-    const revealed = renderDirs(Array.isArray(payload.dirs) ? payload.dirs : [], reveal);
+    const dirs = Array.isArray(payload.dirs) ? payload.dirs : [];
+    const revealed = renderDirs(dirs, reveal);
+    //: Handed to relabel(), which has to repaint the rows' own tooltips without a round trip.
+    lastListing = { dirs, reveal };
     if (revealed) revealRow(list, revealed);
     else setScrollTop(scrollMemory.recall(currentPath));
   }
@@ -279,6 +365,35 @@ export function createPicker(options) {
     void createDir();
   });
 
+  /**
+   * Re-paint every string this dialog was built with, for a language switch.
+   *
+   * The picker paints all of its copy at construction (`t()` at module scope in app.js), and a
+   * switch cannot reload the page without throwing away everything behind the dialog - so without
+   * this, the whole dialog stayed in the language it was built in until the next page load. The
+   * listing is repainted too, because each row's tooltip is render-time copy; the scroll position is
+   * saved and handed back, since re-labelling must not move the user's place in the list.
+   */
+  function relabel() {
+    title.textContent = t("picker.title");
+    closeButton.textContent = t("picker.close");
+    cancelButton.textContent = t("picker.cancel");
+    useButton.textContent = t("picker.use");
+    upButton.textContent = t("picker.up");
+    goButton.textContent = t("picker.go");
+    newDirButton.textContent = t("picker.newDir");
+    hint.textContent = t("picker.hint");
+    emptyNote.textContent = t("picker.empty");
+    locationLabel.textContent = t("picker.location");
+    locationNav.setAttribute("aria-label", t("picker.location"));
+    pathInput.placeholder = t("picker.pathPlaceholder");
+    newNameInput.placeholder = t("picker.newDirPlaceholder");
+    renderLocation(currentPath);
+    const top = list.scrollTop;
+    renderDirs(lastListing.dirs, lastListing.reveal);
+    list.scrollTop = top;
+  }
+
   return {
     open(startPath) {
       if (pending) settle(null);
@@ -296,5 +411,6 @@ export function createPicker(options) {
     close() {
       if (pending) settle(null);
     },
+    relabel,
   };
 }

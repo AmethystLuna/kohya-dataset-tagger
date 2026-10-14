@@ -2839,3 +2839,194 @@ def test_A44_cropping_archives_beside_the_source(api_client, api_sandbox) -> Non
     assert [path.name for path in root.rglob(".tmp-scale-*")] == []
 
 
+# --------------------------------------------------------------------------
+# A45  opening a directory in the OS file manager (section 4.18)
+# --------------------------------------------------------------------------
+
+
+def test_A45_the_file_manager_is_opened_for_an_allowlisted_directory_only(
+    api_client, api_sandbox, monkeypatch
+) -> None:
+    """A45 (section 4.18): `POST /api/fs/reveal` hands **the resolved directory** to this platform's
+    launcher, and hands nothing over when the request is refused.
+
+    The launcher is replaced, because a criterion may not open a window on the machine running it -
+    and the negative half is the one that matters: "403" alone would also pass for an implementation
+    that launched the file manager and *then* refused, so every refusal asserts the recorder is empty.
+
+    The three paths: normal (an allowlisted directory opens), failure (outside the allowlist / a file
+    / a machine with no launcher), recovery (the same request opens the window again once this
+    machine has a launcher - the 500 was a fact about the machine, not about the request).
+
+    **The criterion never widens the allowlist**: `api_client` does not pass `roots_file`, so a
+    `POST /api/roots` here would write the repository root's own file (the rule stated at
+    `path_config` below). The allowlist half is scored by A27/A28 against their own temp files.
+    """
+    from kohya_dataset_tagger.api import reveal
+
+    launched: list = []
+
+    def fake(target):
+        launched.append(Path(target))
+        return "acceptance-launcher"
+
+    monkeypatch.setattr(reveal, "open_in_file_manager", fake)
+
+    work = api_sandbox / "a45"
+    inside = work / "dataset"
+    inside.mkdir(parents=True, exist_ok=True)
+    (inside / "note.txt").write_text("x", encoding="utf-8")
+    outside = api_sandbox.parent / "a45_outside"
+    outside.mkdir(exist_ok=True)
+
+    # 1. normal: the sandbox is inside the allowlist, and the directory that is opened is the one
+    #    the endpoint resolved - not the string that was sent
+    response = api_client.post("/api/fs/reveal", json={"path": str(inside) + os.sep + "."})
+    assert response.status_code == 200, response.text[:400]
+    body = response.json()
+    assert set(body) == {"path", "launcher"}, body
+    assert Path(body["path"]) == inside.resolve(), body["path"]
+    assert launched == [inside.resolve()], "the launcher was handed %s" % launched
+
+    # 2. the empty path is the same fallback as every other path endpoint: the first allowlist root
+    launched.clear()
+    assert api_client.post("/api/fs/reveal", json={}).status_code == 200
+    assert launched == [DATA.resolve()], launched
+
+    # 3. outside the allowlist: 403 outside_roots, and **nothing was launched**
+    launched.clear()
+    refused = api_client.post("/api/fs/reveal", json={"path": str(outside)})
+    assert refused.status_code == 403, refused.text[:200]
+    assert refused.json()["error"]["code"] == "outside_roots", refused.json()
+    assert launched == [], "a refused path still opened a window: %s" % launched
+
+    # 4. a file is not a directory; a missing path is not a directory either
+    launched.clear()
+    assert api_client.post("/api/fs/reveal", json={"path": str(inside / "note.txt")}).status_code == 400
+    assert api_client.post("/api/fs/reveal", json={"path": str(inside / "nope")}).status_code == 404
+    assert launched == [], "a refused path still opened a window: %s" % launched
+
+    # 5. a machine with no launcher says so (500 no_file_manager + the path), instead of a silent 200
+    def unavailable(target):
+        raise reveal.FileManagerUnavailable("no file manager launcher on this system (xdg-open)")
+
+    monkeypatch.setattr(reveal, "open_in_file_manager", unavailable)
+    headless = api_client.post("/api/fs/reveal", json={"path": str(inside)})
+    assert headless.status_code == 500, headless.text[:200]
+    assert headless.json()["error"]["code"] == "no_file_manager", headless.json()
+    assert Path(headless.json()["error"]["params"]["path"]) == inside.resolve()
+
+    # 6. recovery: once this machine has a launcher again the very same request opens the directory -
+    #    the 500 described the machine, not the path
+    monkeypatch.setattr(reveal, "open_in_file_manager", fake)
+    launched.clear()
+    again = api_client.post("/api/fs/reveal", json={"path": str(inside)})
+    assert again.status_code == 200, again.text[:300]
+    assert launched == [inside.resolve()], launched
+
+    # and the dataset itself was never touched: reveal only ever reads a path
+    assert (inside / "note.txt").read_text(encoding="utf-8") == "x"
+
+
+# --------------------------------------------------------------------------
+# A46  the manual reorder (section 4.5 (3), added 2026-10-13)
+# --------------------------------------------------------------------------
+
+
+def test_A46_the_manual_reorder_moves_the_front_and_the_end_blocks(api_client, api_sandbox) -> None:
+    """A46 (§4.5 ③): `order_first` / `order_last` are the frontend's front and end containers.
+
+    The point of scoring it end to end is the **middle**: two captions that share the same tags in
+    different orders must come out with the same front block, the same end block, and *their own*
+    sequence in between. A request that listed every common tag would flatten both into one order -
+    a change the user never asked for and could not see in the containers. So the two files here are
+    deliberately ordered differently.
+
+    The preview and the write are compared byte for byte (A35's rule, applied to ordering).
+    """
+    work = api_sandbox / "a46"
+    root = work / "dataset"
+    root.mkdir(parents=True, exist_ok=True)
+    first = root / "1.png"
+    second = root / "2.png"
+    for image in (first, second):
+        image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    (root / "1.txt").write_bytes("girl, smile, hat, coat".encode("utf-8"))
+    (root / "2.txt").write_bytes("coat, girl, hat, smile".encode("utf-8"))
+
+    images = [str(first), str(second)]
+
+    def order(first_block=None, last_block=None, **extra) -> list:
+        payload = {"images": images, "op": "edit_tags", **extra}
+        if first_block is not None:
+            payload["order_first"] = first_block
+        if last_block is not None:
+            payload["order_last"] = last_block
+        response = api_client.post("/api/captions/batch", json=payload)
+        assert response.status_code == 200, response.text[:400]
+        return [first.with_suffix(".txt").read_text(encoding="utf-8"),
+                second.with_suffix(".txt").read_text(encoding="utf-8")]
+
+    # 1. the same two blocks on both captions, and each keeps its own order in between
+    assert order(["girl"], ["hat"]) == ["girl, smile, coat, hat", "girl, coat, smile, hat"]
+    # 2. the block's own order is the order it is listed in
+    assert order(["coat", "girl"]) == ["coat, girl, smile, hat", "coat, girl, smile, hat"]
+    # 3. a tag no caption carries is skipped, a duplicate counts once, `order_last` still applies
+    #    (both captions are the same order by now, so this is the block rule and nothing else)
+    assert order(["nope", "smile", "smile"], ["girl"]) == [
+        "smile, coat, hat, girl", "smile, coat, hat, girl",
+    ]
+    # 4. the addition's position stays OUTSIDE the order blocks: `head` reaches the very front
+    assert order(["hat"], tags=["head"], position="prepend") == [
+        "head, hat, smile, coat, girl", "head, hat, smile, coat, girl",
+    ]
+    # 4b. the **block additions** (`tags_first` / `tags_last`, 2026-10-13): each is added at the
+    #     outer end of its own block - before everything the order blocks moved, and after them at
+    #     the other end - and a tag the caption already carries is not duplicated
+    assert order(tags_first=["brandnew"], tags_last=["backnew"]) == [
+        "brandnew, head, hat, smile, coat, girl, backnew",
+        "brandnew, head, hat, smile, coat, girl, backnew",
+    ]
+    assert order(tags_first=["head"], tags_last=["girl"]) == [
+        "brandnew, head, hat, smile, coat, girl, backnew",
+        "brandnew, head, hat, smile, coat, girl, backnew",
+    ]
+    unchanged_additions = api_client.post("/api/captions/batch", json={
+        "images": images, "op": "edit_tags", "tags_first": ["head"], "dry_run": True,
+    }).json()
+    assert unchanged_additions["applied"] == 0, (
+        "a block addition of a tag the captions already carry was counted as a change"
+    )
+
+    before = [path.read_bytes() for path in (root / "1.txt", root / "2.txt")]
+    # 5. the preview equals the write, byte for byte
+    preview = api_client.post("/api/captions/batch", json={
+        "images": images, "op": "edit_tags", "order_last": ["smile"], "dry_run": True,
+    })
+    assert preview.status_code == 200, preview.text[:300]
+    body = preview.json()
+    assert body["dry_run"] is True and body["applied"] == 2, body
+    after = [entry["after"] for entry in body["results"]]
+    assert [path.read_bytes() for path in (root / "1.txt", root / "2.txt")] == before, (
+        "the preview wrote to the disk it was only supposed to describe"
+    )
+    written = api_client.post("/api/captions/batch", json={
+        "images": images, "op": "edit_tags", "order_last": ["smile"],
+    })
+    assert written.status_code == 200 and written.json()["applied"] == 2, written.text[:300]
+    assert [first.with_suffix(".txt").read_text(encoding="utf-8"),
+            second.with_suffix(".txt").read_text(encoding="utf-8")] == after, (
+        "the preview and the write disagree about the new order"
+    )
+    # 6. an order that changes nothing is `changed: false`, and an empty block is not a change
+    #    (`brandnew` is the caption's first tag by now - step 4b put it there)
+    nothing = api_client.post("/api/captions/batch", json={
+        "images": images, "op": "edit_tags", "order_first": ["brandnew"], "dry_run": True,
+    }).json()
+    assert nothing["applied"] == 0, nothing
+    assert all(entry["changed"] is False for entry in nothing["results"]), nothing
+
+    # and the dataset itself was not asked about anything outside the sandbox
+    assert first.is_file() and second.is_file()
+
+

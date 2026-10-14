@@ -10,6 +10,59 @@ dataset) is not repeated here: it lives next to the code, in
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-14
+
+### Added
+
+- **Tag autocomplete wherever a tag is typed.** The dropdown used to live inside the per-image editor,
+  where the batch panel could not reach it; it is one shared module now (`web/js/suggest.js`) that both
+  surfaces use. The candidates are the scope's **own tags first** — no request, each showing how many
+  images carry it — with the WD14 vocabulary as a fallback, which matters because that vocabulary is
+  empty until a tagger model is installed. `find` suggests only tags the images already carry (a tag they
+  do not carry is a suggestion that cannot be acted on), `replace` may name a new one, taking a
+  suggestion drops a stale preview, and one `Enter` is claimed by exactly one handler.
+- **Open the directory on screen in your file manager.** A gallery toolbar button calls the new
+  `POST /api/fs/reveal`, which starts `explorer.exe` / `open` / `xdg-open` on an allowlisted path —
+  fire-and-forget, because the launcher can exit non-zero even when it worked.
+- **The directory picker shows where you are.** A breadcrumb of the path's ancestors sits above the
+  listing (each ancestor a button, the directory itself plain text), because the editable path box hides
+  the end of a long path — and picking a directory now happens while the dialog is relabelled on a
+  language switch.
+- **Hand-reorder a scope's tags in the batch panel.** The common-tag list *is* the order editor: each row
+  has a drag handle, one container holds a single image's own order, and a multi-image scope gets the
+  front / keep / end containers — the middle is never sent, because a batch has no single order to
+  impose on captions that differ. The same editor adds a tag to either end (its own permanent `+` row
+  appends an editable element), renames by editing a row, deletes by clearing one, and the keyboard
+  (`↑`/`↓`, `Home`, `End`) reaches the same three containers. It goes through the same
+  preview → backup → write → undo path as every other batch edit.
+
+### Changed
+
+- The batch panel offers **six operations** instead of nine. `append` / `prepend` / `remove` are gone
+  from the panel because its common-tag editor covers them (add at either end, clear a row, or replace
+  with an empty string for a tag that is not common); the endpoint keeps the three as its primitive set.
+- The two order containers are named **前置 / 维持 / 后置** — `Prefix` / `Keep` / `Suffix` in English,
+  プレフィックス / 維持 / サフィックス in Japanese.
+- `edit_tags` gained `order_first` / `order_last` (move those tags to the front / to the end, everything
+  else keeps its own relative order) and `tags_first` / `tags_last` (additions that belong to one of the
+  two blocks).
+
+### Fixed
+
+- **The pinned container row could vanish.** A flex item with `overflow: auto` loses its automatic
+  minimum size, so once the long middle list overflowed, `flex-shrink: 1` squashed the front/end row to
+  zero height — measured in real Chrome: 0 px, against 97 px with the fix. Both rows and lists keep their
+  content height now and the group scrolls instead.
+- **A list could be squashed to its own `min-height` floor** with its rows overflowing it invisibly (an
+  explicit `min-height` is also the floor a flex item may shrink to).
+- **`aria-label` was never actually set** in the batch panel's JavaScript-built controls (`aria-label` is
+  not a property of an element), so those accessible names did not exist; and an element appended after
+  construction had no placeholder until the next relabel, which also rebuilt the row and threw away a
+  half-typed tag.
+- The spacing around the add row and the empty-list gap (30 px where every other gap is 4 px) are one
+  declared value now, and the hint that still pointed at the removed add field was rewritten in all
+  three languages.
+
 ## [0.1.1] - 2026-10-01
 
 ### Fixed
@@ -64,6 +117,7 @@ own `config_util`, not by a fixture of our own.
 - The service listens on `127.0.0.1` only. See [SECURITY.md](SECURITY.md) before changing that.
 - Requires Python 3.10 or newer. Torch is not needed.
 
-[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.2.0
 [0.1.1]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.0

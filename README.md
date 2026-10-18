@@ -10,6 +10,7 @@
   <a href="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml"><img src="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://afdian.com/a/amethystluna"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6" alt="Sponsor on Afdian"></a>
 </p>
 
 <p align="center">
@@ -142,6 +143,10 @@ When the file cannot be written the feature **still works**, and the UI says "th
 ## Contributing
 
 Issues and pull requests are welcome, in English or Chinese; work on the tool itself starts at [AGENTS.md](AGENTS.md). [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the two-tier gate, the rules a change has to respect and what CI runs. Security problems go through [SECURITY.md](SECURITY.md); the project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).
+
+## Sponsor
+
+If this tool saves you time on a dataset, you can support its development on Afdian (爱发电): [afdian.com/a/amethystluna](https://afdian.com/a/amethystluna).
 
 ## License
 

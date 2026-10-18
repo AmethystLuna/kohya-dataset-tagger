@@ -10,6 +10,7 @@
   <a href="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml"><img src="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://afdian.com/a/amethystluna"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6" alt="在爱发电上赞助"></a>
 </p>
 
 <p align="center">
@@ -142,6 +143,10 @@ models/<model-id>/
 ## 参与贡献
 
 欢迎提 issue 和 PR，中英文都可以；要改这个工具本身，从 [AGENTS.md](AGENTS.md)（英文）开始。[CONTRIBUTING.md](CONTRIBUTING.md)（英文）里有环境搭建、两级闸门、改动必须遵守的规则，以及 CI 跑什么。安全问题请走 [SECURITY.md](SECURITY.md)（英文）；项目遵循 [Contributor Covenant](CODE_OF_CONDUCT.md)（英文）。
+
+## 赞助
+
+如果这个工具替你省下了整理数据集的时间，可以在爱发电上支持它继续开发：[afdian.com/a/amethystluna](https://afdian.com/a/amethystluna)。
 
 ## 许可证
 

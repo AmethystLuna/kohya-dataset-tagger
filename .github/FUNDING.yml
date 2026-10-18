@@ -1,0 +1,4 @@
+# GitHub's "Sponsor" button reads this file. Afdian is not one of GitHub's built-in
+# funding platforms, so it goes under `custom`: GitHub still renders every custom link as a
+# Sponsor button on the repository page.
+custom: ["https://afdian.com/a/amethystluna"]

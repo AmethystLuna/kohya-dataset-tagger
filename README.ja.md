@@ -10,6 +10,7 @@
   <a href="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml"><img src="https://github.com/AmethystLuna/kohya-dataset-tagger/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python 3.10+"></a>
+  <a href="https://afdian.com/a/amethystluna"><img src="https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-Afdian-946CE6" alt="Afdian で支援する"></a>
 </p>
 
 <p align="center">
@@ -142,6 +143,10 @@ models/<model-id>/
 ## コントリビュート
 
 Issue とプルリクエストは英語でも中国語でも歓迎する。ツール自体を触る場合は [AGENTS.md](AGENTS.md)（英語）から。[CONTRIBUTING.md](CONTRIBUTING.md)（英語）には、セットアップ、2 段階のゲート、変更が守るべきルール、CI が実行する内容がある。セキュリティの問題は [SECURITY.md](SECURITY.md)（英語）へ。このプロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md)（英語）に従う。
+
+## スポンサー
+
+このツールがデータセットの整理時間を節約できたなら、Afdian（愛発電）で開発を支援できます：[afdian.com/a/amethystluna](https://afdian.com/a/amethystluna)。
 
 ## ライセンス
 

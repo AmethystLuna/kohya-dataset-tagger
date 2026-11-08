@@ -192,6 +192,78 @@ def test_the_panel_reads_the_shared_store_and_the_scope_strip() -> None:
     assert "processing()" in train and "setProcessing(" in train
 
 
+def test_a_locked_ratio_locks_the_numeric_fields() -> None:
+    """A preset is a promise about the shape, and §4.17 calls the numeric X/Y/W/H fields the
+    exact path. So the lock cannot be something only the handle drags respect: typing a width
+    with a ratio locked must derive the height (and the other way round), through the same pure
+    geometry the drags use."""
+    body = text_of(CROP)
+    assert "applyNumeric(" in body, "the numeric fields bypass the ratio lock"
+    assert 'readNumeric(fieldOfInput(input), false)' in body, (
+        "typing a size does not update its partner live - the two boxes would disagree"
+    )
+    assert "readNumeric(fieldOfInput(event.target), true)" in body, (
+        "Enter does not commit a numeric field through the lock"
+    )
+    assert "export function applyNumeric(" in text_of(CROPBOX), (
+        "the ratio-locked numeric rule is not in the pure geometry module"
+    )
+
+
+def test_the_dialog_offers_the_output_scaling_switch() -> None:
+    """§4.17 rule 6: `scale` is present or absent, never a flag. The dialog has to offer that
+    decision where it describes the output, and it must be the **same** answer as the panel's
+    switch - two checkboxes holding two opinions about one body is how a request gains a field
+    nobody meant to send."""
+    body = text_of(CROP)
+    assert 'make("input", "crop-scale")' in body, "the confirmation dialog has no output-scaling switch"
+    assert 'dialog.scaleBox.addEventListener("change"' in body, "the switch is not wired"
+    assert "dialog.scale = scaled;" in body, "the switch does not reach the request body"
+    assert "scaleField.box.checked = scaled;" in body, (
+        "the dialog and the panel would hold two answers to 'was scaling asked for'"
+    )
+
+
+def test_the_canvas_can_zoom_and_pan_without_moving_the_box() -> None:
+    """The dialog's canvas zooms and pans; the crop rectangle does not move because of it. The
+    two gestures are separated by *where the drag starts*, and the wheel is bound to the stage
+    because the box covers the whole viewport for a full-frame crop - a gesture the box could
+    swallow would leave that crop unzoomable."""
+    body = text_of(CROP)
+    assert 'make("div", "crop-canvas")' in body, "the image and the box do not share one canvas"
+    assert 'addEventListener("wheel", onWheel, { passive: false })' in body, (
+        "the wheel is not bound to the stage (passive, so it must not scroll the page either)"
+    )
+    assert "dialog.space === true" in body, "Space does not turn the drag into a pan"
+    assert "function resetView()" in body, "there is no way back to the fitted view"
+    assert "fitCanvas(" in body and "zoomView(" in body, "the view math is not used"
+    assert "export function fitCanvas(" in text_of(CROPBOX) and "export function zoomView(" in text_of(CROPBOX), (
+        "the canvas view math is not in the pure geometry module"
+    )
+    # The rectangle the request carries is dialog.rect, and none of the view code touches it.
+    assert body.count("dialog.rect = ") >= 1
+    assert "dialog.rect = dialog.view" not in body
+
+
+def test_the_dialog_draws_the_original_and_previews_the_crop() -> None:
+    """§4.17: the rectangle is placed on the real pixels, so the dialog draws the source file
+    (`/api/images/raw`), not the thumbnail cache - with one thumbnail fallback for a source the
+    browser cannot decode. The preview switch is a read-only projection: every option frozen.
+    """
+    body = text_of(CROP)
+    assert "rawUrl(" in body, "the dialog does not draw the original image"
+    assert "thumbnailFallback" in body, "a source the browser cannot decode has no fallback"
+    assert 'make("input", "crop-preview")' in body, "the toolbar has no crop preview switch"
+    assert "setPreview(" in body and "function setPreview(" in body
+    assert "function applyEnabled(" in body and "dialog.preview === true" in body, (
+        "the preview does not freeze the options"
+    )
+    assert "fitPreview(" in body and "export function fitPreview(" in text_of(CROPBOX), (
+        "the preview geometry is not the pure view math"
+    )
+    assert 'imageRaw: "GET /api/images/raw"' in text_of(API), "api.js does not declare the raw route"
+
+
 def test_a_run_ends_in_exactly_one_function() -> None:
     """Three endings - the last image confirmed, the end button, Esc - owe the user the same
     summary, the same directory refresh and the same optional tag job. Closing the dialog alone

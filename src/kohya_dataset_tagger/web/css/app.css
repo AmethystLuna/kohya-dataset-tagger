@@ -1288,21 +1288,41 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .crop-dialog .crop-toolbar { align-items: flex-end; }
 .crop-rect { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .crop-rect input { width: 100%; }
+/* The output-scaling switch rides the readout line: the sentence it changes is the one that says
+   what the confirmed crop will write, so the two belong next to each other. */
+.crop-output { align-items: center; }
+.crop-output .hint { flex: 1 1 auto; min-width: 0; }
+/* The stage is a fixed viewport; the canvas inside it is what zoom and pan move. A height that
+   does not depend on the image is what makes the wheel predictable and keeps a pan from
+   reflowing the dialog. The background is the same shade the box paints outside itself, so
+   "outside the crop" reads as one surface whether it is over the image or not. */
 .crop-stage {
   position: relative;
   display: block;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
+  height: min(56vh, 560px);
   margin: 8px auto;
   overflow: hidden;
   line-height: 0;
+  background: var(--crop-shade);
+  cursor: grab;
   /* A drag is a crop, not a page scroll: let the pointer own the gesture. */
   touch-action: none;
 }
+.crop-stage.is-preview { cursor: default; }
+.crop-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
 .crop-image {
   display: block;
-  max-width: 100%;
-  max-height: 56vh;
+  width: 100%;
+  height: 100%;
+  /* The dialog draws the original file, so the browser must honor its EXIF orientation: the box
+     is measured against the display size (§4.17), and a sideways photo would put it on the wrong
+     pixels. */
+  image-orientation: from-image;
   user-select: none;
   -webkit-user-drag: none;
 }

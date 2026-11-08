@@ -19,6 +19,7 @@ export const ROUTES = Object.freeze({
   fsPick: "GET /api/fs/pick",
   fsPickMkdir: "POST /api/fs/pick/mkdir",
   imageThumb: "GET /api/images/thumb",
+  imageRaw: "GET /api/images/raw",
   imageMeta: "GET /api/images/meta",
   captions: "GET /api/captions",
   captionsWrite: "PUT /api/captions",
@@ -163,6 +164,15 @@ async function request(routeKey, options) {
 /** Thumbnail URL. size must be one of THUMB_SIZE; the gallery passes GRID only. */
 export function thumbUrl(path, size, cacheBust) {
   return routeUrl("imageThumb", { path, size, v: cacheBust });
+}
+
+/**
+ * The source image itself, at its own resolution. Only the crop dialog asks for it (§4.17):
+ * the rectangle is placed on the real pixels, not on a downscaled cache. The gallery and the
+ * zoom surface stay on THUMB_SIZE.GRID / PREVIEW, so browsing still never decodes an original.
+ */
+export function rawUrl(path, cacheBust) {
+  return routeUrl("imageRaw", { path, v: cacheBust });
 }
 
 export const api = {

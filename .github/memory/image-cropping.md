@@ -1,6 +1,6 @@
 ---
 name: image-cropping
-description: Dataset image cropping (section 4.17) - confirm a rectangle per image, archive it beside the source as <stem>_N, the display-coordinate rule (EXIF), keep-format and no-caption-inherited semantics, the box inheritance rule across resolutions, and how the optional tagger step reuses /api/autotag/run
+description: Dataset image cropping (section 4.17) - confirm a rectangle per image, archive it beside the source as <stem>_N, the display-coordinate rule (EXIF), keep-format and no-caption-inherited semantics, the box inheritance rule across resolutions, the aspect lock that binds the numeric W/H fields as well as the handle drags, the output-scaling switch that lives in both the panel and the dialog, the zoom/pan canvas view that never moves the crop box, the original-resolution canvas with its crop preview, and how the optional tagger step reuses /api/autotag/run
 metadata:
   type: topic
 ---
@@ -75,14 +75,45 @@ that would freeze an order the user has not chosen yet.
     from `autotag.js`). No second model picker, no second thresholds table, no per-image tagging job.
 11. **Snapping is measured in display pixels** (6 px, converted against the drawn image), so it feels the same
     on a 512 px and a 6000 px image; the guides are the frame edges, the centre and the two thirds.
+12. **A locked ratio binds the numeric W/H fields, not just the mouse.** `cropbox.applyNumeric` is the single
+    rule: the edited box drives and its partner is derived (`height = width / ratio`, or the reverse),
+    `input` updates the partner live and `change`/Enter writes the applied numbers back. A size the frame
+    cannot hold is capped by the **largest rectangle of that ratio that fits** - the same "stop at the frame"
+    rule as a handle drag - because clamping each axis on its own is exactly how the ratio would be lost
+    silently. `x`/`y` only move the box. With no preset (`free`) the two fields stay independent, and
+    `source` locks to the image's own ratio like any other preset.
+13. **"Was scaling asked for" has one answer, kept in two places.** The panel's `crop.scaleAfter` switch is the
+    run default, and the confirmation dialog carries the same switch on its readout line; changing either
+    writes both (`dialog.scaleBox` -> `scaled` -> `scaleField.box` -> `paintOptions`), so the choice made
+    for one image carries to the next image and becomes the panel's state for the next run (the rule the
+    aspect preset already follows). Off sends `scale: null` (§4.17 rule 6) and writes the box's own pixels.
+    The switch is disabled while a write is in flight, because it decides the body that is already sent.
+14. **The canvas view is separate from the crop box.** The stage is a fixed viewport; the image and the box live
+    in one `.crop-canvas` that zoom (wheel, 0.25x-8x, around the pointer) and pan (a drag on the background, or
+    Space/middle-drag anywhere) move together. The two gesture families are separated by *where the drag starts*,
+    and the wheel is bound to the stage because the box is the top layer: for a full-frame crop there is no
+    background left to grab, and a gesture the box swallowed would make that crop unzoomable. The view decides
+    only the display - `dialog.rect`, the numeric fields and the request body are source pixels, so zooming and
+    panning can never change the crop. `0` and every new image return to the fitted, centred view.
+15. **The dialog draws the original, not the thumbnail cache.** `GET /api/images/raw` streams the source file
+    (ETag = size+mtime, `private, no-cache`) so zooming shows the pixels the crop keeps; the gallery and the zoom
+    surface stay on the grid/preview thumbnails. `image-orientation: from-image` keeps the browser's EXIF
+    handling in step with `display_width/height`. A source the browser cannot decode falls back to the preview
+    thumbnail **once** (proportional, so the box still means the same rectangle); a second failure is the
+    "broken preview" that disables Confirm.
+16. **The crop preview is a view, not a crop.** The toolbar switch fits the rectangle to the stage and clips the
+    rest of the image away, so the viewport shows exactly the confirmed result; every option (aspect, X/Y/W/H,
+    normalize, reset, output scaling) and every canvas gesture is frozen meanwhile, while the switch itself and
+    Enter/Esc stay live. Leaving it (or confirming, or moving to the next image) restores the editable view the
+    user had; the rectangle is never touched.
 
 ## Known limits
 
 - Re-running the crop over the same directory treats the archives as sources (`foo_1.png` -> `foo_1_1.png`).
   There is no resume and no "`_N` looks like an archive, skip it" heuristic: guessing would sooner or later
   exclude a real image. Documented in section 4.17 rather than papered over.
-- The dialog draws the 1600 px preview thumbnail; precision comes from the numeric X/Y/W/H fields and the
-  snapping, not from the pixels on screen.
+- The gallery and the zoom surface draw the 1600 px preview thumbnail; the crop dialog draws the original, so
+  its zoom is real detail - decoded one image at a time.
 - **The archive name adds one `_`-separated token**, and two places further down the pipeline are
   underscore-sensitive. Both are **pre-existing** (they bite `foo.png` next to `foo_bar.png` just as well)
   and neither makes a crop wrong - but the crop makes the `<stem>_<n>` shape systematic, so they are
@@ -126,5 +157,6 @@ that would freeze an order the user has not chosen yet.
   crop-only rendering, the full-frame byte copy;
 - `test/test_crop_api.py`: the endpoint end to end (naming, no caption, keep-format, clamping, EXIF,
   scale-from-crop, 403/404/400/422, no temp files);
-- `test_web_crop.py` + `crop_harness.mjs`: the panel and dialog (request body, box inheritance, ratio lock,
-  failed write, tagger reuse, single write path).
+- `test_web_crop.py` + `crop_harness.mjs`: the panel and dialog (request body, box inheritance, the ratio lock
+  for both a handle drag and a typed width/height, the zoom/pan canvas view, the crop preview that freezes the
+  options, the original image with its thumbnail fallback, failed write, tagger reuse, single write path).

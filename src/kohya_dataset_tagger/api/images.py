@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Response
+from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 
 from .. import config
@@ -34,6 +35,16 @@ _IMMUTABLE = "public, max-age=31536000, immutable"
 #: Fallback for decode failures: PIL's UnidentifiedImageError is an OSError subclass, but
 #: DecompressionBombError only inherits from Exception - not listing it explicitly would turn into a 500.
 _DECODE_ERRORS = (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError)
+
+#: Source suffix -> media type. Every suffix here is in paths.IMAGE_EXTS (the allowlist is what
+#: decides whether a file is an image at all); anything else is refused before this table is read.
+_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 
 
 def _has_alpha(im: Image.Image) -> bool:
@@ -83,6 +94,38 @@ def image_thumb(
         headers={
             "ETag": '"%s"' % thumb.stem,
             "Cache-Control": _IMMUTABLE,
+        },
+    )
+
+
+@router.get("/images/raw")
+def image_raw(path: str = Query(..., description="Absolute image path")) -> Any:
+    """Return the **source file's own bytes** (the crop dialog draws the original, §4.17).
+
+    Deliberately a separate route from /images/thumb: browsing must never decode originals
+    (that is what the thumbnail cache is for), while the crop dialog has to place a rectangle
+    on the real pixels. Streamed with FileResponse so a large source is not read into memory
+    on the way through; the ETag is size+mtime, which is enough for a local file the user may
+    replace. Out of bounds 403 / missing 404 / not an image 400, exactly like the thumb route.
+    """
+    try:
+        image = resolve_query_path(path)
+    except paths.PathOutsideRoots as exc:
+        return error_response(403, exc.code, str(exc), params=exc.params)
+    except FileNotFoundError as exc:
+        return error_response(404, "not_found", str(exc), params={"path": str(path)})
+    if not image.is_file():
+        return error_response(400, "not_a_file", "Not a file: %s" % image, params={"path": str(image)})
+    if not _is_supported_image(image.name):
+        return error_response(400, "unsupported_image", "Unsupported image extension: %s" % image.name, params={"name": image.name})
+    media_type = _MEDIA_TYPES.get(image.suffix.lower(), "application/octet-stream")
+    stat = image.stat()
+    return FileResponse(
+        image,
+        media_type=media_type,
+        headers={
+            "ETag": '"%d-%d"' % (stat.st_size, int(stat.st_mtime)),
+            "Cache-Control": "private, no-cache",
         },
     )
 

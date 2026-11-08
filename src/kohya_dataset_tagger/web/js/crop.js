@@ -32,14 +32,18 @@
  * showing (the panel hands them over through getTaggerParams). It runs **after** the dialog
  * closes - one job for the whole batch, so the model loads once and the shelf shows one row.
  */
-import { api, autotagStreamUrl, thumbUrl, THUMB_SIZE } from "./api.js";
+import { api, autotagStreamUrl, rawUrl, thumbUrl, THUMB_SIZE } from "./api.js";
 import { forgetJob, rememberJob } from "./jobstore.js";
 import { t } from "./strings.js";
 import {
   ASPECT_PRESETS,
   CROP_HANDLES,
+  applyNumeric,
   areaOf,
   clampRect,
+  clampView,
+  fitCanvas,
+  fitPreview,
   formatRatio,
   frameOf,
   guidesOf,
@@ -51,6 +55,7 @@ import {
   resizeByHandle,
   snapDelta,
   wholeFrame,
+  zoomView,
 } from "./cropbox.js";
 
 //: The archive format (section 4.17): "keep" writes the source's own format, .bmp falling back to PNG.
@@ -66,6 +71,8 @@ export const CROP_DEFAULTS = Object.freeze({
 export const CROP_MIN_SIZE = 8;
 //: Snapping distance in **display** pixels; converted to source pixels against the drawn image.
 export const CROP_SNAP_PX = 6;
+//: Wheel zoom rate: one 100-pixel notch is about x1.16, fine enough for a trackpad.
+const CROP_ZOOM_RATE = 0.0015;
 //: Error rows rendered before the panel says "and N more".
 export const CROP_ERROR_ROWS = 20;
 //: Consecutive EventSource failures tolerated while tagging before giving up.
@@ -363,8 +370,14 @@ export function createCropPanel(options) {
 
     const normalizeButton = button("btn", t("crop.normalize"));
     const resetButton = button("btn", t("crop.reset"));
+    //: "Show me the crop": a view mode, not a crop parameter, so it sits at the end of the
+    //: toolbar. While it is on every option is frozen and the canvas is a read-only projection.
+    const previewBox = make("input", "crop-preview");
+    previewBox.type = "checkbox";
+    const previewToggle = make("label", "field-inline");
+    previewToggle.append(previewBox, make("span", "", t("crop.preview")));
     const toolbar = make("div", "row crop-toolbar");
-    toolbar.append(aspectField, rectFields, normalizeButton, resetButton);
+    toolbar.append(aspectField, rectFields, normalizeButton, resetButton, previewToggle);
 
     const image = make("img", "crop-image");
     image.alt = "";
@@ -380,10 +393,24 @@ export function createCropPanel(options) {
       handles.set(name, handle);
       boxEl.append(handle);
     }
+    // The image and the box live in one canvas that is what zoom and pan move, so the box can
+    // never drift away from the pixels it describes.
+    const canvasEl = make("div", "crop-canvas");
+    canvasEl.append(image, boxEl);
     const stage = make("div", "crop-stage");
-    stage.append(image, boxEl);
+    stage.append(canvasEl);
 
     const readout = make("div", "hint mono");
+    //: The output-scaling switch, on the readout line: the sentence it changes is the one that
+    //: says what the confirmed crop will write. Same value as the panel's switch (the two are
+    //: written together in startRun), so "was scaling asked for" still has exactly one answer.
+    const scaleBox = make("input", "crop-scale");
+    scaleBox.type = "checkbox";
+    scaleBox.checked = scaled;
+    const scaleToggle = make("label", "field-inline");
+    scaleToggle.append(scaleBox, make("span", "", t("crop.scaleAfter")));
+    const outputRow = make("div", "row crop-output");
+    outputRow.append(scaleToggle, readout);
     const wroteLine = make("div", "hint mono");
     const keyHint = make("div", "hint", t("crop.keys"));
     const errorLine = make("div", "errors");
@@ -395,22 +422,67 @@ export function createCropPanel(options) {
     const dialogActions = make("div", "row crop-actions");
     dialogActions.append(finishButton, skipButton, confirmButton);
 
-    shell.append(head, toolbar, stage, readout, wroteLine, keyHint, errorLine, dialogActions);
+    shell.append(head, toolbar, stage, outputRow, wroteLine, keyHint, errorLine, dialogActions);
     backdrop.append(shell);
     document.body.append(backdrop);
 
     return {
-      backdrop, shell, counter, aspectSelect, xInput, yInput, wInput, hInput,
-      normalizeButton, resetButton, image, stage, boxEl, handles, readout, wroteLine,
+      backdrop, shell, counter, aspectSelect, xInput, yInput, wInput, hInput, scaleBox,
+      normalizeButton, resetButton, previewBox, image, stage, canvasEl, boxEl, handles, readout, wroteLine,
       keyHint, errorLine, finishButton, skipButton, confirmButton, restoreFocusTo,
     };
   }
 
-  /** The drawing scale: CSS pixels per source pixel. Guards the headless case (no layout). */
-  function paintBox() {
+  /** The stage viewport in CSS pixels. The headless harness has no layout: fall back to the frame. */
+  function stageSize() {
+    const frame = (dialog && dialog.frame) || { width: 1, height: 1 };
+    const stage = dialog ? dialog.stage : null;
+    const width = stage && stage.clientWidth ? stage.clientWidth : frame.width;
+    const height = stage && stage.clientHeight ? stage.clientHeight : frame.height;
+    return { width: Math.max(1, width), height: Math.max(1, height) };
+  }
+
+  /**
+   * Paint the canvas - the image and the crop box travel together, so zooming and panning can
+   * never move one without the other: the box keeps describing the same pixels, and the
+   * confirmed rectangle is whatever the numeric fields say, not what the viewport shows.
+   */
+  function paintView() {
     if (!dialog || !dialog.frame) return;
+    const stage = stageSize();
+    if (dialog.preview && dialog.rect) {
+      // Preview: the crop rectangle becomes the whole viewport, fitted and centred, and the
+      // clip-path throws away the image around it - the viewport shows the crop and only the
+      // crop. The crop keeps its own aspect; a mismatched stage shows as letterbox.
+      const fit = fitPreview(dialog.frame, dialog.rect, stage);
+      dialog.canvasSize = { width: fit.width, height: fit.height, base: { width: fit.width, height: fit.height } };
+      dialog.canvasEl.style.width = fit.width + "px";
+      dialog.canvasEl.style.height = fit.height + "px";
+      dialog.canvasEl.style.left = fit.left + "px";
+      dialog.canvasEl.style.top = fit.top + "px";
+      dialog.canvasEl.style.clipPath =
+        "inset(" + fit.clip.top + "px " + fit.clip.right + "px " + fit.clip.bottom + "px " + fit.clip.left + "px)";
+      return;
+    }
+    const base = fitCanvas(dialog.frame, stage);
+    dialog.view = clampView(dialog.view || { zoom: 1, x: 0, y: 0 }, base, stage);
+    const view = dialog.view;
+    const width = Math.max(1, Math.round(base.width * view.zoom));
+    const height = Math.max(1, Math.round(base.height * view.zoom));
+    dialog.canvasSize = { width, height, base };
+    dialog.canvasEl.style.width = width + "px";
+    dialog.canvasEl.style.height = height + "px";
+    dialog.canvasEl.style.left = Math.round(view.x) + "px";
+    dialog.canvasEl.style.top = Math.round(view.y) + "px";
+    dialog.canvasEl.style.clipPath = "";
+  }
+
+  /** The drawing scale: CSS pixels per source pixel, read from the canvas (so it follows zoom). */
+  function paintBox() {
+    if (!dialog || !dialog.frame || !dialog.rect) return;
     const frame = dialog.frame;
-    const cssWidth = Math.max(1, dialog.image.clientWidth || dialog.image.naturalWidth || frame.width);
+    const size = dialog.canvasSize || { width: frame.width, height: frame.height };
+    const cssWidth = Math.max(1, size.width);
     dialog.drawScale = cssWidth / frame.width;
     //: Source pixels per CSS pixel - what a pointer delta has to be multiplied by.
     dialog.pointerScale = frame.width / cssWidth;
@@ -455,7 +527,11 @@ export function createCropPanel(options) {
   }
 
   function paintDialog() {
-    paintBox();
+    if (!dialog || !dialog.rect) return;
+    paintView();
+    // The box is hidden in preview; drawing it against the preview's canvas scale would be a
+    // rectangle nobody can see and a scale the next drag would read as the truth.
+    if (!dialog.preview) paintBox();
     paintNumeric();
     paintReadout();
   }
@@ -488,7 +564,8 @@ export function createCropPanel(options) {
     const guides = guidesOf(frame);
     const targetsX = [0].concat(guides.vertical, [frame.width]);
     const targetsY = [0].concat(guides.horizontal, [frame.height]);
-    const perPixel = frame.width / Math.max(1, dialog.image.clientWidth || frame.width);
+    // Six **screen** pixels, so a zoomed-in canvas snaps just as gently as a fitted one.
+    const perPixel = dialog.pointerScale || frame.width / Math.max(1, dialog.canvasSize ? dialog.canvasSize.width : frame.width);
     const threshold = Math.max(1, Math.round(CROP_SNAP_PX * perPixel));
     let adjustX = 0;
     let adjustY = 0;
@@ -510,19 +587,29 @@ export function createCropPanel(options) {
     return { dx: dx + adjustX, dy: dy + adjustY };
   }
 
+  /**
+   * One pointer down decides which gesture this is, and the two never mix: a handle resizes and
+   * the box moves (crop operations), everything else - the background, or anything at all while
+   * Space or the middle button is held - pans the canvas. The box is the top layer, so a
+   * full-frame crop leaves no background to grab: Space/middle is what keeps the canvas pannable
+   * there, and the wheel (which bubbles up through the box) is what keeps it zoomable.
+   */
   function onPointerDown(event) {
-    if (!dialog || dialog.busy) return;
+    if (!dialog || dialog.busy || dialog.drag || dialog.preview) return;
+    const button = Number.isFinite(Number(event.button)) ? Number(event.button) : 0;
+    if (button !== 0 && button !== 1) return;
     const target = event.target || {};
     const handle = target.dataset && target.dataset.handle ? String(target.dataset.handle) : null;
     const inside = target === dialog.boxEl || String(target.className || "").indexOf("crop-box") >= 0;
-    const mode = handle || (inside ? "move" : null);
-    if (!mode) return;
+    const pan = button === 1 || dialog.space === true || (!handle && !inside);
+    const mode = pan ? "pan" : handle || "move";
     if (event.preventDefault) event.preventDefault();
     dialog.drag = {
       mode,
       startX: Number(event.clientX) || 0,
       startY: Number(event.clientY) || 0,
       rect: dialog.rect,
+      view: dialog.view ? { zoom: dialog.view.zoom, x: dialog.view.x, y: dialog.view.y } : null,
       pointerId: event.pointerId,
     };
     if (dialog.stage.setPointerCapture && event.pointerId !== undefined) {
@@ -536,6 +623,16 @@ export function createCropPanel(options) {
 
   function onPointerMove(event) {
     if (!dialog || !dialog.drag) return;
+    if (dialog.drag.mode === "pan") {
+      const start = dialog.drag.view || { zoom: 1, x: 0, y: 0 };
+      dialog.view = {
+        zoom: start.zoom,
+        x: start.x + (Number(event.clientX) - dialog.drag.startX),
+        y: start.y + (Number(event.clientY) - dialog.drag.startY),
+      };
+      paintView();
+      return;
+    }
     const scale = dialog.pointerScale || 1;
     const rawX = (Number(event.clientX) - dialog.drag.startX) * scale;
     const rawY = (Number(event.clientY) - dialog.drag.startY) * scale;
@@ -556,7 +653,80 @@ export function createCropPanel(options) {
     if (dialog) dialog.drag = null;
   }
 
+  /**
+   * The wheel zooms the canvas around the pointer. It is attached to the stage, which the box is
+   * only a child of, so a crop box covering the whole viewport cannot swallow the gesture.
+   */
+  function onWheel(event) {
+    if (!dialog || dialog.busy || dialog.preview || !dialog.frame || !dialog.view) return;
+    if (event.preventDefault) event.preventDefault();
+    const raw = Number(event.deltaY) || 0;
+    // deltaMode: 0 = pixels, 1 = lines, 2 = pages. A line-mode wheel sends 3, not 100.
+    const delta = event.deltaMode === 1 ? raw * 16 : event.deltaMode === 2 ? raw * 400 : raw;
+    if (delta === 0) return;
+    const stage = stageSize();
+    const base = fitCanvas(dialog.frame, stage);
+    const rect = dialog.stage.getBoundingClientRect ? dialog.stage.getBoundingClientRect() : { left: 0, top: 0 };
+    const anchor = {
+      x: (Number(event.clientX) || 0) - (Number(rect.left) || 0),
+      y: (Number(event.clientY) || 0) - (Number(rect.top) || 0),
+    };
+    dialog.view = zoomView(dialog.view, base, stage, Math.exp(-delta * CROP_ZOOM_RATE), anchor);
+    paintView();
+    paintBox();
+  }
+
+  /** "0": back to the fitted, centred view - the way out of a zoom the user lost track of. */
+  function resetView() {
+    if (!dialog || !dialog.frame) return;
+    dialog.view = { zoom: 1, x: 0, y: 0 };
+    paintView();
+    paintBox();
+  }
+
+  function onWindowResize() {
+    if (!dialog) return;
+    paintDialog();
+  }
+
+  // A window that loses focus while Space is held must not leave the next drag panning.
+  function onWindowBlur() {
+    if (dialog) dialog.space = false;
+  }
+
   // ---- the dialog's own controls ----------------------------------------
+  /**
+   * Freeze the options. Two things freeze them: a write in flight (the body is already built)
+   * and the crop preview (the rectangle is not editable while you look at its result). The
+   * preview switch itself stays live - it is the way out of the preview.
+   */
+  function applyEnabled() {
+    if (!dialog) return;
+    const frozen = dialog.busy === true || dialog.preview === true || !dialog.frame;
+    dialog.aspectSelect.disabled = frozen;
+    for (const input of [dialog.xInput, dialog.yInput, dialog.wInput, dialog.hInput]) input.disabled = frozen;
+    dialog.normalizeButton.disabled = frozen;
+    dialog.resetButton.disabled = frozen;
+    dialog.scaleBox.disabled = frozen;
+    dialog.previewBox.disabled = dialog.busy === true || !dialog.frame;
+  }
+
+  /**
+   * The crop preview: the viewport shows the crop's result and nothing else, and every option
+   * is frozen because there is nothing to adjust while previewing. Leaving it restores the
+   * canvas view the user had, untouched.
+   */
+  function setPreview(on) {
+    if (!dialog) return;
+    dialog.preview = on === true;
+    dialog.drag = null;
+    dialog.previewBox.checked = dialog.preview;
+    dialog.boxEl.hidden = dialog.preview;
+    dialog.stage.classList.toggle("is-preview", dialog.preview);
+    applyEnabled();
+    paintDialog();
+  }
+
   function setBusy(value) {
     if (!dialog) return;
     dialog.busy = value === true;
@@ -568,6 +738,7 @@ export function createCropPanel(options) {
       : dialog.index + 1 >= dialog.items.length
         ? t("crop.confirmLast")
         : t("crop.confirm");
+    applyEnabled();
   }
 
   /**
@@ -590,14 +761,46 @@ export function createCropPanel(options) {
       : "";
   }
 
-  function readNumeric() {
-    if (!dialog) return;
-    setRect({
-      x: integerOr(dialog.xInput.value, dialog.rect.x),
-      y: integerOr(dialog.yInput.value, dialog.rect.y),
-      width: Math.max(1, integerOr(dialog.wInput.value, dialog.rect.width)),
-      height: Math.max(1, integerOr(dialog.hInput.value, dialog.rect.height)),
-    });
+  /** Which of the four numeric fields is this input? `null` for anything else. */
+  function fieldOfInput(input) {
+    if (!dialog || !input) return null;
+    if (input === dialog.xInput) return "x";
+    if (input === dialog.yInput) return "y";
+    if (input === dialog.wInput) return "width";
+    if (input === dialog.hInput) return "height";
+    return null;
+  }
+
+  /**
+   * Commit the four numeric fields.
+   *
+   * With a ratio locked the width and the height are one value: the edited box drives and its
+   * partner is derived (cropbox.applyNumeric), so a typed 800 in a 1:1 crop puts 800 in the other
+   * box too instead of leaving a box that no longer has the ratio the preset promises. A size the
+   * frame cannot hold is capped by the largest rectangle of that ratio that fits, and `commit`
+   * writes the applied numbers back into the boxes - a box showing a value the crop did not take
+   * is the one thing a numeric field must not do.
+   */
+  function readNumeric(edited, commit) {
+    if (!dialog || !dialog.frame || !dialog.rect) return;
+    setRect(
+      applyNumeric(
+        {
+          x: integerOr(dialog.xInput.value, dialog.rect.x),
+          y: integerOr(dialog.yInput.value, dialog.rect.y),
+          width: Math.max(1, integerOr(dialog.wInput.value, dialog.rect.width)),
+          height: Math.max(1, integerOr(dialog.hInput.value, dialog.rect.height)),
+        },
+        edited,
+        currentRatio(),
+        dialog.frame,
+      ),
+    );
+    if (!commit || !dialog) return;
+    dialog.xInput.value = String(dialog.rect.x);
+    dialog.yInput.value = String(dialog.rect.y);
+    dialog.wInput.value = String(dialog.rect.width);
+    dialog.hInput.value = String(dialog.rect.height);
   }
 
   function onDialogKeyDown(event) {
@@ -612,7 +815,7 @@ export function createCropPanel(options) {
     if (event.key === "Enter") {
       if (typing && event.target !== dialog.aspectSelect) {
         // Enter inside a number box commits that box; the button is how the crop is confirmed.
-        readNumeric();
+        readNumeric(fieldOfInput(event.target), true);
         if (event.target.blur) event.target.blur();
         return;
       }
@@ -620,7 +823,19 @@ export function createCropPanel(options) {
       void confirmCurrent();
       return;
     }
-    if (typing) return;
+    if (typing || dialog.preview) return;
+    if (event.key === " ") {
+      // Space is the pan modifier. It is also a button's activation key, and the confirm button
+      // holds the focus - so the default is cancelled here and on keyup, or a pan would crop.
+      event.preventDefault();
+      dialog.space = true;
+      return;
+    }
+    if (event.key === "0") {
+      event.preventDefault();
+      resetView();
+      return;
+    }
     const step = event.shiftKey ? 10 : 1;
     const dx = event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0;
     const dy = event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0;
@@ -639,11 +854,22 @@ export function createCropPanel(options) {
     setRect(moveBy(dialog.rect, dx, dy, dialog.frame));
   }
 
+  function onDialogKeyUp(event) {
+    if (!dialog) return;
+    if (event.key === " ") {
+      if (event.preventDefault) event.preventDefault();
+      dialog.space = false;
+    }
+  }
+
   // ---- the run ----------------------------------------------------------
   function resetDialogFor(index) {
     dialog.index = index;
     dialog.errorLine.textContent = "";
-    dialog.image.src = thumbUrl(dialog.items[index], THUMB_SIZE.PREVIEW);
+    dialog.thumbnailFallback = false;
+    // The rectangle is placed on the original pixels, not on the downscaled thumbnail cache:
+    // zooming in has to show the detail the crop will actually keep (§4.17).
+    dialog.image.src = rawUrl(dialog.items[index]);
   }
 
   /**
@@ -671,6 +897,9 @@ export function createCropPanel(options) {
       // Skip (or the end button) is the way out, and the next image gets its own frame.
       dialog.frame = null;
       dialog.rect = null;
+      dialog.view = null;
+      dialog.canvasSize = null;
+      leavePreview();
       resetDialogFor(index);
       dialog.readout.textContent = "";
       dialog.wroteLine.textContent = "";
@@ -690,9 +919,22 @@ export function createCropPanel(options) {
     dialog.rect = previousRect && previousFrame
       ? propagate(previousRect, currentRatio(), previousFrame, frame)
       : defaultRect();
+    // Every image starts fitted and centred: the box is carried over, but a view zoomed into the
+    // last image's detail would open this one on a random corner.
+    dialog.view = { zoom: 1, x: 0, y: 0 };
+    leavePreview();
     resetDialogFor(index);
     paintDialog();
     setBusy(false);
+  }
+
+  /** The next image opens editable: the preview is an explicit check, not a mode of the run. */
+  function leavePreview() {
+    if (!dialog) return;
+    dialog.preview = false;
+    dialog.previewBox.checked = false;
+    dialog.boxEl.hidden = false;
+    dialog.stage.classList.toggle("is-preview", false);
   }
 
   function closeDialog() {
@@ -700,6 +942,11 @@ export function createCropPanel(options) {
     const finished = dialog;
     dialog = null;
     document.removeEventListener("keydown", onDialogKeyDown);
+    document.removeEventListener("keyup", onDialogKeyUp);
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener("blur", onWindowBlur);
+    }
     if (finished.backdrop && finished.backdrop.remove) finished.backdrop.remove();
     if (finished.restoreFocusTo && typeof finished.restoreFocusTo.focus === "function") {
       finished.restoreFocusTo.focus();
@@ -789,37 +1036,77 @@ export function createCropPanel(options) {
       scale: scaled,
       aspectId,
       busy: false,
+      preview: false,
+      thumbnailFallback: false,
       drag: null,
+      space: false,
+      view: null,
+      canvasSize: null,
       lastWrite: "",
     });
     dialog.stage.addEventListener("pointerdown", onPointerDown);
     dialog.stage.addEventListener("pointermove", onPointerMove);
     dialog.stage.addEventListener("pointerup", onPointerUp);
     dialog.stage.addEventListener("pointercancel", onPointerUp);
+    // Not passive: the wheel must not scroll the page behind the dialog while it zooms.
+    dialog.stage.addEventListener("wheel", onWheel, { passive: false });
     dialog.aspectSelect.addEventListener("change", () => {
       if (!dialog) return;
       dialog.aspectId = dialog.aspectSelect.value;
       aspectId = dialog.aspectId;
       applyAspect();
     });
+    // One answer for "was scaling asked for" (§4.17): the dialog's switch writes the panel's, so
+    // the rest of the run and the next run start from the choice made here - the same rule the
+    // aspect preset already follows.
+    dialog.scaleBox.addEventListener("change", () => {
+      if (!dialog) return;
+      scaled = dialog.scaleBox.checked === true;
+      dialog.scale = scaled;
+      scaleField.box.checked = scaled;
+      paintOptions();
+      // Without a frame (the metadata read failed) there is no readout to correct; the switch
+      // still holds the value the next image will be confirmed with.
+      if (dialog.frame && dialog.rect) paintReadout();
+    });
+    dialog.previewBox.addEventListener("change", () => {
+      if (!dialog) return;
+      setPreview(dialog.previewBox.checked === true);
+    });
     dialog.normalizeButton.addEventListener("click", () => normalize());
     dialog.resetButton.addEventListener("click", () => setRect(defaultRect()));
     for (const input of [dialog.xInput, dialog.yInput, dialog.wInput, dialog.hInput]) {
-      input.addEventListener("change", () => readNumeric());
+      // `input` is the live half: the partner box follows while the number is typed, which is
+      // what "the two boxes are locked" means. `change` commits (Enter or leaving the field) and
+      // writes the applied values back, including a size the frame had to cap.
+      input.addEventListener("input", () => readNumeric(fieldOfInput(input), false));
+      input.addEventListener("change", () => readNumeric(fieldOfInput(input), true));
     }
     dialog.finishButton.addEventListener("click", () => endRun());
     dialog.skipButton.addEventListener("click", () => skipCurrent());
     dialog.confirmButton.addEventListener("click", () => { void confirmCurrent(); });
-    dialog.image.addEventListener("load", () => paintBox());
+    dialog.image.addEventListener("load", () => paintDialog());
     dialog.image.addEventListener("error", () => {
       if (!dialog) return;
-      // The box is drawn against the image that failed to arrive, so the geometry on screen is not
-      // what the crop would use. Say so instead of leaving a plausible-looking box.
+      // A source the browser cannot decode falls back to the preview thumbnail once - the
+      // geometry is proportional, so the box still describes the same rectangle - and only a
+      // second failure is reported. The box is drawn against the image that failed to arrive,
+      // so a plausible-looking box over a missing image is exactly what must not stay on screen.
+      if (dialog.thumbnailFallback !== true) {
+        dialog.thumbnailFallback = true;
+        dialog.image.src = thumbUrl(dialog.items[dialog.index], THUMB_SIZE.PREVIEW);
+        return;
+      }
       const name = baseName(dialog.items[dialog.index]);
       dialog.errorLine.textContent = t("crop.previewFailed", { name });
       dialog.confirmButton.disabled = true;
     });
     document.addEventListener("keydown", onDialogKeyDown);
+    document.addEventListener("keyup", onDialogKeyUp);
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("resize", onWindowResize);
+      window.addEventListener("blur", onWindowBlur);
+    }
     paintScope();
     dialog.confirmButton.focus();
     await showImage(0);

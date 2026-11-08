@@ -77,8 +77,16 @@ class FakeNode {
     this.listeners[type] = (this.listeners[type] || []).filter((item) => item !== handler);
   }
   fire(type, event) {
-    const payload = Object.assign({ type, target: this, preventDefault() {} }, event || {});
-    for (const handler of [...(this.listeners[type] || [])]) handler(payload);
+    // A real event bubbles up the tree; the dialog relies on that (the wheel over the crop box
+    // must reach the stage), so the fake has to model it too.
+    const payload = Object.assign(
+      { type, target: this, propagationStopped: false, preventDefault() {}, stopPropagation() { this.propagationStopped = true; } },
+      event || {},
+    );
+    for (let node = this; node; node = node.parentNode || null) {
+      for (const handler of [...(node.listeners[type] || [])]) handler(payload);
+      if (payload.propagationStopped) break;
+    }
   }
   focus() { globalThis.document.activeElement = this; }
   blur() { if (globalThis.document.activeElement === this) globalThis.document.activeElement = null; }
@@ -116,6 +124,14 @@ function pressKey(key, extra) {
     extra || {},
   );
   for (const handler of [...(documentListeners.keydown || [])]) handler(event);
+}
+
+function liftKey(key, extra) {
+  const event = Object.assign(
+    { key, target: globalThis.document.body, shiftKey: false, altKey: false, preventDefault() {} },
+    extra || {},
+  );
+  for (const handler of [...(documentListeners.keyup || [])]) handler(event);
 }
 
 class FakeEventSource {
@@ -292,6 +308,66 @@ assert.equal(tooBig.clamped, true, "a frame that cannot hold the target area mus
 assert.ok(tooBig.rect.width <= 800 && tooBig.rect.height <= 600);
 assert.equal(tooBig.rect.width, tooBig.rect.height, "the ratio survives the reduction");
 
+// The numeric fields obey the lock too: the exact path must not be able to break a shape the
+// mouse keeps. The edited box drives, the partner follows, and the frame caps the pair instead
+// of clamping one axis on its own (which is exactly how a lock would silently be lost).
+assert.deepEqual(
+  box.applyNumeric({ x: 0, y: 0, width: 800, height: 100 }, "width", 1, frame),
+  { x: 0, y: 0, width: 800, height: 800 },
+  "typing the width derives the height",
+);
+assert.deepEqual(
+  box.applyNumeric({ x: 0, y: 0, width: 100, height: 600 }, "height", 1.5, frame),
+  { x: 0, y: 0, width: 900, height: 600 },
+  "typing the height derives the width",
+);
+assert.deepEqual(
+  box.applyNumeric({ x: 0, y: 0, width: 5000, height: 100 }, "width", 1.5, frame),
+  { x: 0, y: 0, width: 1000, height: 667 },
+  "a width the frame cannot hold is capped, and the ratio survives",
+);
+assert.deepEqual(
+  box.applyNumeric({ x: 500, y: 100, width: 400, height: 123 }, "x", 1, frame),
+  { x: 500, y: 100, width: 400, height: 123 },
+  "x and y move the box, they never resize it",
+);
+assert.deepEqual(
+  box.applyNumeric({ x: 0, y: 0, width: 300, height: 900 }, "height", null, frame),
+  { x: 0, y: 0, width: 300, height: 900 },
+  "without a lock the two size fields are independent",
+);
+
+// The canvas view: fit at zoom 1, clamped inside the stage, zoomed around the pointer.
+assert.deepEqual(
+  box.fitCanvas({ width: 3000, height: 2000 }, { width: 900, height: 450 }),
+  { width: 675, height: 450 },
+  "zoom 1 fits the stage and keeps the aspect",
+);
+assert.deepEqual(
+  box.fitCanvas({ width: 100, height: 100 }, { width: 900, height: 450 }),
+  { width: 100, height: 100 },
+  "a small image is never enlarged to fill the stage",
+);
+const viewStage = { width: 900, height: 450 };
+const viewBase = { width: 675, height: 450 };
+assert.deepEqual(
+  box.clampView({ zoom: 1, x: 999, y: 999 }, viewBase, viewStage),
+  { zoom: 1, x: 112.5, y: 0 },
+  "a canvas smaller than the stage is centred",
+);
+assert.deepEqual(
+  box.clampView({ zoom: 2, x: -9999, y: 9999 }, viewBase, viewStage),
+  { zoom: 2, x: -450, y: 0 },
+  "a canvas larger than the stage is pinned to its edges",
+);
+assert.deepEqual(
+  box.zoomView({ zoom: 1, x: 112.5, y: 0 }, viewBase, viewStage, 2, { x: 450, y: 225 }),
+  { zoom: 2, x: -225, y: -225 },
+  "zooming keeps the image point under the cursor",
+);
+assert.equal(box.zoomView({ zoom: 1, x: 0, y: 0 }, viewBase, viewStage, 100, { x: 0, y: 0 }).zoom, box.VIEW_MAX_ZOOM);
+assert.equal(box.zoomView({ zoom: 1, x: 0, y: 0 }, viewBase, viewStage, 0.001, { x: 0, y: 0 }).zoom, box.VIEW_MIN_ZOOM);
+
 // Carrying the box to the next image.
 assert.deepEqual(
   box.propagate({ x: 100, y: 100, width: 200, height: 200 }, null, { width: 1000, height: 1000 }, { width: 1000, height: 1000 }),
@@ -403,7 +479,7 @@ const rectFields = findAll(dialog, (node) => node.tagName === "INPUT" && node.ty
 assert.ok(confirmButton && skipButton && finishButton && normalizeButton && resetButton, "the dialog controls must exist");
 assert.equal(rectFields.length, 4, "X / Y / width / height");
 assert.equal(aspectSelect.children.length, box.ASPECT_PRESETS.length, "one option per preset");
-assert.ok(String(image.src).indexOf("/api/images/thumb") >= 0, "the dialog draws the preview thumbnail");
+assert.ok(String(image.src).indexOf("/api/images/raw") >= 0, "the dialog must draw the original, not the thumbnail cache");
 const rectNow = () => rectFields.map((field) => field.value);
 
 // The default box is the whole frame; the image load is what gives the overlay its scale.
@@ -418,6 +494,103 @@ assert.deepEqual(rectNow(), ["0", "0", "3000", "2000"], "an unlocked box starts 
 aspectSelect.value = "1:1";
 aspectSelect.fire("change");
 assert.deepEqual(rectNow(), ["500", "0", "2000", "2000"], "1:1 must fit the frame");
+
+// The two size boxes are one value while a ratio is locked: typing the width must move the
+// height, and committing writes back what the frame actually took.
+rectFields[2].value = "800";
+rectFields[2].fire("input");
+assert.deepEqual(rectNow(), ["500", "0", "800", "800"], "typing the width must derive the height");
+rectFields[3].value = "600";
+rectFields[3].fire("change");
+assert.deepEqual(rectNow(), ["500", "0", "600", "600"], "typing the height must derive the width");
+
+// 3:2 makes the two axes distinguishable, and the frame still owns the ceiling.
+aspectSelect.value = "3:2";
+aspectSelect.fire("change");
+assert.deepEqual(rectNow(), ["0", "0", "3000", "2000"], "3:2 fills a 3000x2000 frame");
+rectFields[3].value = "300";
+rectFields[3].fire("input");
+assert.deepEqual(rectNow(), ["0", "0", "450", "300"], "the width follows the typed height");
+rectFields[2].value = "5000";
+rectFields[2].fire("change");
+assert.deepEqual(rectNow(), ["0", "0", "3000", "2000"], "a width the frame cannot hold is capped, ratio kept");
+
+// With no lock the two size fields are independent again.
+aspectSelect.value = "free";
+aspectSelect.fire("change");
+rectFields[2].value = "700";
+rectFields[2].fire("input");
+assert.deepEqual(rectNow(), ["0", "0", "700", "2000"], "a free crop leaves the height alone");
+
+// Back to 1:1: the normalize assertions below continue from the same box as before.
+aspectSelect.value = "1:1";
+aspectSelect.fire("change");
+assert.deepEqual(rectNow(), ["500", "0", "2000", "2000"]);
+
+// The canvas zooms and pans **without** touching the crop rectangle: the box keeps describing
+// the same pixels, and a box covering the whole viewport must not swallow the wheel (the wheel
+// is bound to the stage, and a real event bubbles up through the box).
+const canvasEl = findOne(dialog, (node) => node.className === "crop-canvas");
+assert.ok(canvasEl, "the dialog must have one canvas that carries the image and the box");
+assert.equal(canvasEl.style.width, "3000px", "zoom 1 fits the frame (the fake DOM has no layout)");
+const canvasBox = findOne(dialog, (node) => node.className === "crop-box");
+const rectBeforeView = rectNow();
+canvasBox.fire("wheel", { deltaY: -120, clientX: 400, clientY: 300 });
+assert.ok(parseFloat(canvasEl.style.width) > 3000, "the wheel must zoom even with the box under the pointer");
+assert.deepEqual(rectNow(), rectBeforeView, "zooming must not touch the crop rectangle");
+
+const leftBeforePan = parseFloat(canvasEl.style.left);
+pressKey(" ");
+canvasBox.fire("pointerdown", { button: 0, clientX: 400, clientY: 300 });
+canvasBox.fire("pointermove", { clientX: 460, clientY: 330 });
+canvasBox.fire("pointerup", {});
+liftKey(" ");
+assert.ok(parseFloat(canvasEl.style.left) > leftBeforePan, "Space+drag pans even with the box under the pointer");
+assert.deepEqual(rectNow(), rectBeforeView, "panning must not touch the crop rectangle");
+
+pressKey("0");
+assert.equal(canvasEl.style.width, "3000px", "0 goes back to the fitted view");
+assert.equal(canvasEl.style.left, "0px");
+
+// The crop preview: the viewport shows only the crop result, and every option is frozen.
+const previewToggle = findOne(dialog, (node) => node.className === "crop-preview");
+assert.ok(previewToggle, "the toolbar must offer a crop preview switch");
+// A 1000x1000 box (the 1:1 lock derives the height) so "fit the crop" is not the same size as
+// "fit the image" - otherwise the assertion could pass without a preview at all.
+rectFields[2].value = "1000";
+rectFields[2].fire("change");
+const rectBeforePreview = rectNow();
+assert.deepEqual(rectBeforePreview, ["500", "0", "1000", "1000"]);
+previewToggle.checked = true;
+previewToggle.fire("change");
+assert.equal(findOne(dialog, (node) => node.className === "crop-box").hidden, true, "the box is not part of the preview");
+assert.equal(aspectSelect.disabled, true, "the aspect preset is frozen while previewing");
+assert.equal(rectFields[2].disabled, true, "the numeric fields are frozen while previewing");
+assert.equal(normalizeButton.disabled, true);
+assert.equal(resetButton.disabled, true);
+assert.equal(findOne(dialog, (node) => node.className === "crop-scale").disabled, true, "output scaling is frozen too");
+// 1000x1000 in the 3000x2000 fake stage: scale 2, the crop is centred on the image's own scale,
+// and everything outside it is clipped away.
+assert.equal(canvasEl.style.width, "6000px");
+assert.equal(canvasEl.style.left, "-500px");
+assert.equal(canvasEl.style.clipPath, "inset(0px 3000px 2000px 1000px)", "the rest of the image must be clipped away");
+assert.deepEqual(rectNow(), rectBeforePreview, "preview must not change the crop");
+canvasBox.fire("wheel", { deltaY: -240, clientX: 500, clientY: 300 });
+assert.equal(canvasEl.style.width, "6000px", "the wheel is frozen while previewing");
+pressKey(" ");
+assert.equal(previewToggle.checked, true);
+liftKey(" ");
+
+previewToggle.checked = false;
+previewToggle.fire("change");
+assert.equal(findOne(dialog, (node) => node.className === "crop-box").hidden, false, "leaving preview brings the box back");
+assert.equal(aspectSelect.disabled, false, "leaving preview unfreezes the options");
+assert.equal(rectFields[2].disabled, false);
+assert.equal(canvasEl.style.width, "3000px", "leaving preview restores the fitted view");
+// Back to the full 1:1 box for the normalize assertions below.
+aspectSelect.value = "1:1";
+aspectSelect.fire("change");
+assert.deepEqual(rectNow(), ["500", "0", "2000", "2000"]);
 
 // "Match the target area" makes the box area the shared resolution's area (1536x1536).
 normalizeButton.fire("click");
@@ -528,7 +701,47 @@ await settle();
 assert.equal(dialogHost(), null, "the run ends after the last image");
 
 // ---------------------------------------------------------------------------
-// 5. the tagger step reuses /api/autotag/run with the Tagger tab's settings
+// 5. the dialog's own output-scaling switch decides the body and carries through the run
+// ---------------------------------------------------------------------------
+switches[1].checked = false;
+switches[1].fire("change");
+scoped = ["F:/data/1.png", "F:/data/2.png"];
+await panel.start();
+await settle();
+dialog = dialogHost();
+const dialogScale = findOne(dialog, (node) => node.className === "crop-scale");
+assert.ok(dialogScale, "the dialog must offer the output-scaling option");
+assert.equal(dialogScale.checked, true, "it starts at the panel's switch");
+const scaledReadout = findOne(
+  dialog,
+  (node) => String(node.textContent || "").indexOf(t("crop.outputScaled", { width: 1536, height: 1536 })) >= 0,
+);
+assert.ok(scaledReadout, "the readout must describe the scaled output next to the switch");
+dialogScale.checked = false;
+dialogScale.fire("change");
+assert.equal(switches[0].checked, false, "the panel's switch is the same answer, not a second one");
+assert.ok(String(scaledReadout.textContent).indexOf(t("crop.outputNative")) >= 0, "the readout follows the switch");
+const beforeUnscaled = bodiesFor("/api/crop/apply").length;
+findOne(dialog, (node) => node.className === "btn btn-primary").fire("click");
+await settle();
+dialog = dialogHost();
+assert.equal(
+  findOne(dialog, (node) => node.className === "crop-scale").checked,
+  false,
+  "the choice carries to the next image instead of reverting behind the user",
+);
+findOne(dialog, (node) => node.className === "btn btn-primary").fire("click");
+await settle();
+const unscaledRun = bodiesFor("/api/crop/apply").slice(beforeUnscaled);
+assert.equal(unscaledRun.length, 2, "both images were confirmed");
+assert.equal(unscaledRun[0].scale, null, "an unchecked switch must send no scaling half");
+assert.equal(unscaledRun[1].scale, null, "and the next image keeps the choice");
+assert.equal(dialogHost(), null, "the second confirm ends the two-image run");
+switches[0].checked = true;
+switches[0].fire("change");
+
+// ---------------------------------------------------------------------------
+// 6. the tagger step reuses /api/autotag/run with the Tagger tab's settings
 // ---------------------------------------------------------------------------
 const before = bodiesFor("/api/autotag/run").length;
 switches[1].checked = true;
@@ -574,7 +787,31 @@ assert.equal(bodiesFor("/api/autotag/cancel").length, 1, "cancel must hit the fr
 assert.ok(shelfRows[shelfRows.length - 1].finished || shelfRows.length >= 1);
 
 // ---------------------------------------------------------------------------
-// 6. relabel: the panel's own copy is repainted, not rebuilt
+// 7. the dialog draws the original, and falls back to the thumbnail exactly once
+// ---------------------------------------------------------------------------
+scoped = ["F:/data/1.png"];
+await panel.start();
+await settle();
+dialog = dialogHost();
+const originalImage = findOne(dialog, (node) => node.tagName === "IMG");
+assert.ok(String(originalImage.src).indexOf("/api/images/raw") >= 0, "the canvas draws the source file");
+originalImage.fire("error");
+assert.ok(
+  String(originalImage.src).indexOf("/api/images/thumb") >= 0,
+  "a source the browser cannot decode falls back to the preview thumbnail",
+);
+const fallbackConfirm = findOne(dialog, (node) => node.className === "btn btn-primary");
+assert.equal(fallbackConfirm.disabled, false, "the fallback is not a failure");
+originalImage.fire("error");
+assert.equal(fallbackConfirm.disabled, true, "a second failure is a broken preview");
+const previewError = findOne(dialog, (node) => node.className === "errors");
+assert.ok(String(previewError.textContent || "").length > 0, "the broken preview must be visible");
+pressKey("Escape");
+await settle();
+assert.equal(dialogHost(), null, "the broken preview run ends like any other");
+
+// ---------------------------------------------------------------------------
+// 8. relabel: the panel's own copy is repainted, not rebuilt
 // ---------------------------------------------------------------------------
 panel.relabel();
 assert.equal(startButton.textContent, t("crop.start"));

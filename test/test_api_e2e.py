@@ -56,7 +56,7 @@ MODEL_ID = "wd-swinv2-tagger-v3"
 CAPTION_EXT = ".txt"
 
 #: The §4 frozen route table + §4.4's cancel + §4.9's export + §4.11's runtime path configuration.
-#: (19 paths / 24 methods; this set makes only a **subset** assertion, so extra registered routes are not a failure.)
+#: (20 paths / 25 methods; this set makes only a **subset** assertion, so extra registered routes are not a failure.)
 EXPECTED_ROUTES = {
     ("GET", "/api/health"),
     ("GET", "/api/roots"),
@@ -64,6 +64,7 @@ EXPECTED_ROUTES = {
     ("DELETE", "/api/roots"),
     ("GET", "/api/fs/list"),
     ("GET", "/api/images/thumb"),
+    ("GET", "/api/images/raw"),
     ("GET", "/api/images/meta"),
     ("GET", "/api/captions"),
     ("PUT", "/api/captions"),
@@ -436,6 +437,26 @@ def test_images_thumb_and_meta(dataset_client, thumb_dir) -> None:
     assert list(thumb_dir.glob("*.webp")), "the thumbnail cache directory has no files"
 
 
+def test_images_raw_serves_the_source_bytes(dataset_client) -> None:
+    """§4.17: the crop dialog draws the original, so this route must return the file itself -
+    byte for byte, with the file's own media type - and never the re-encoded thumbnail."""
+    image = _sample_image(require_caption=False)
+    expected = image.read_bytes()
+    response = dataset_client.get("/api/images/raw", params={"path": str(image)})
+    assert response.status_code == 200, response.text[:300]
+    assert response.content == expected, "the raw route must serve the source, byte for byte"
+    suffix = image.suffix.lower()
+    media_type = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }[suffix]
+    assert response.headers["content-type"] == media_type
+    assert response.headers.get("etag"), "the raw response needs an ETag (the dialog re-opens the same file)"
+
+
 def test_captions_get_shape_matches_trainer_split(dataset_client) -> None:
     image = _sample_image(require_caption=True)
     response = dataset_client.get("/api/captions", params={"path": str(image)})
@@ -691,6 +712,7 @@ def test_cache_status_shape(dataset_client) -> None:
 @pytest.mark.parametrize("route,params", [
     ("/api/fs/list", {"path": r"C:\Windows"}),
     ("/api/images/thumb", {"path": "../../etc/passwd"}),
+    ("/api/images/raw", {"path": r"C:\Windows\win.ini"}),
     ("/api/images/meta", {"path": r"C:\Windows\win.ini"}),
     ("/api/captions", {"path": r"C:\Windows\win.ini"}),
     ("/api/cache/status", {"path": r"C:\Windows"}),
@@ -811,6 +833,14 @@ def test_actionable_4xx_errors_carry_localizable_params(workspace) -> None:
     )
     frozen(
         workspace.client.get("/api/images/thumb", params={"path": str(workspace.post)}),
+        400, "not_a_file", {"path": str(workspace.post)},
+    )
+    frozen(
+        workspace.client.get("/api/images/raw", params={"path": str(notes)}),
+        400, "unsupported_image", {"name": "notes.txt"},
+    )
+    frozen(
+        workspace.client.get("/api/images/raw", params={"path": str(workspace.post)}),
         400, "not_a_file", {"path": str(workspace.post)},
     )
     frozen(

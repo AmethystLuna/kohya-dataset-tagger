@@ -150,6 +150,34 @@ export function normalizeArea(rect, ratio, targetArea, frame) {
 }
 
 /**
+ * One manual edit of one numeric field (X / Y / W / H).
+ *
+ * With a ratio locked the two size fields are **one value**: editing the width derives the
+ * height, editing the height derives the width. The lock is a promise about the shape, so it
+ * cannot be something only the mouse respects. The box still may not leave the frame, so the
+ * typed size is capped by the largest rectangle of that ratio that fits - the same "stop at the
+ * frame" rule the handle drags follow, and it keeps the ratio instead of clamping each axis on
+ * its own (which is what would silently break the lock). `x` / `y` only move the box.
+ */
+export function applyNumeric(rect, field, ratio, frame) {
+  const fw = Math.max(1, Math.round(frame.width));
+  const fh = Math.max(1, Math.round(frame.height));
+  let width = Math.max(1, Math.round(rect.width));
+  let height = Math.max(1, Math.round(rect.height));
+  const lock = ratio && ratio > 0 ? ratio : null;
+  if (lock && field === "width") {
+    // The width drives. Its ceiling is whichever frame axis runs out first, so the derived
+    // height can never exceed the frame either.
+    width = Math.min(width, Math.max(1, Math.floor(fh * lock)), fw);
+    height = Math.max(1, Math.round(width / lock));
+  } else if (lock && field === "height") {
+    height = Math.min(height, Math.max(1, Math.floor(fw / lock)), fh);
+    width = Math.max(1, Math.round(height * lock));
+  }
+  return clampRect({ x: rect.x, y: rect.y, width, height }, frame);
+}
+
+/**
  * One drag of one handle.
  *
  * The rule the whole interaction follows: **the opposite edge (or corner) does not move**.
@@ -341,4 +369,103 @@ export function formatRatio(width, height) {
 /** The area of a rectangle, as the normalize button and the readout use it. */
 export function areaOf(rect) {
   return Math.max(0, Math.round(rect.width)) * Math.max(0, Math.round(rect.height));
+}
+
+// ---------------------------------------------------------------------------
+// The canvas view: zoom and pan of what the dialog draws, in CSS pixels
+// ---------------------------------------------------------------------------
+//
+// The view decides only how the image is *displayed*; the crop rectangle stays in source
+// pixels and never learns about it. A view is {zoom, x, y} where x/y is the canvas offset
+// inside the stage viewport, and `base` (fitCanvas) is the canvas size at zoom 1.
+
+/** Zoom range: a quarter (see the whole image with margins) to eight times. */
+export const VIEW_MIN_ZOOM = 0.25;
+export const VIEW_MAX_ZOOM = 8;
+
+function limitZoom(zoom) {
+  const value = Number.isFinite(zoom) ? zoom : 1;
+  return Math.min(VIEW_MAX_ZOOM, Math.max(VIEW_MIN_ZOOM, value));
+}
+
+/**
+ * The canvas size at zoom 1: the image fitted into the stage viewport, and **never enlarged**
+ * past its own size - a 200 px thumbnail stretched to 900 px would only show bigger pixels.
+ */
+export function fitCanvas(frame, stage) {
+  const fw = Math.max(1, Math.round(frame.width));
+  const fh = Math.max(1, Math.round(frame.height));
+  const sw = Math.max(1, Math.round(stage.width));
+  const sh = Math.max(1, Math.round(stage.height));
+  const scale = Math.min(sw / fw, sh / fh, 1);
+  return { width: Math.max(1, Math.round(fw * scale)), height: Math.max(1, Math.round(fh * scale)) };
+}
+
+/**
+ * Keep the canvas inside the viewport: when it is smaller than the stage it is centred, when
+ * it is larger it is pinned to the edges (no empty gutter between the image and the viewport).
+ * This is what stops a pan from losing the image somewhere off-screen.
+ */
+export function clampView(view, base, stage) {
+  const zoom = limitZoom(view.zoom);
+  const sw = Math.max(1, Math.round(stage.width));
+  const sh = Math.max(1, Math.round(stage.height));
+  const width = Math.max(1, base.width * zoom);
+  const height = Math.max(1, base.height * zoom);
+  const x = width <= sw ? (sw - width) / 2 : Math.min(0, Math.max(sw - width, view.x));
+  const y = height <= sh ? (sh - height) / 2 : Math.min(0, Math.max(sh - height, view.y));
+  return { zoom, x, y };
+}
+
+/**
+ * The "show me the crop" transform: the crop rectangle is the whole viewport, fitted to the
+ * stage, and the rest of the image is clipped away.
+ *
+ * Returns where the whole image has to sit (`width`/`height` at the crop's scale, `left`/`top`
+ * so the crop lands centred) plus the clip that removes everything outside the crop. The crop's
+ * aspect is kept; when it does not match the stage the letterbox is the stage background, not
+ * image. Nothing here is interactive - the preview is a read-only projection of the rectangle
+ * the dialog is about to confirm.
+ */
+export function fitPreview(frame, rect, stage) {
+  const fw = Math.max(1, Math.round(frame.width));
+  const fh = Math.max(1, Math.round(frame.height));
+  const rw = Math.max(1, Math.round(rect.width));
+  const rh = Math.max(1, Math.round(rect.height));
+  const sw = Math.max(1, Math.round(stage.width));
+  const sh = Math.max(1, Math.round(stage.height));
+  const scale = Math.min(sw / rw, sh / rh);
+  return {
+    scale,
+    width: Math.max(1, Math.round(fw * scale)),
+    height: Math.max(1, Math.round(fh * scale)),
+    left: Math.round((sw - rw * scale) / 2 - rect.x * scale),
+    top: Math.round((sh - rh * scale) / 2 - rect.y * scale),
+    clip: {
+      top: Math.round(rect.y * scale),
+      right: Math.round((fw - rect.x - rw) * scale),
+      bottom: Math.round((fh - rect.y - rh) * scale),
+      left: Math.round(rect.x * scale),
+    },
+  };
+}
+
+/**
+ * Zoom one step around an anchor **in stage coordinates** (the pointer), so the image point
+ * under the cursor stays put. Zooming into the middle of the frame instead makes a crop tool
+ * fight the user: the detail they aimed at drifts away.
+ */
+export function zoomView(view, base, stage, factor, anchor) {
+  const zoom = limitZoom(view.zoom * factor);
+  const ratio = zoom / (view.zoom || 1);
+  const point = anchor || { x: 0, y: 0 };
+  return clampView(
+    {
+      zoom,
+      x: point.x - (point.x - view.x) * ratio,
+      y: point.y - (point.y - view.y) * ratio,
+    },
+    base,
+    stage,
+  );
 }

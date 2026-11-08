@@ -10,6 +10,39 @@ dataset) is not repeated here: it lives next to the code, in
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
+### Added
+
+- **Zoom and pan the crop dialog's canvas.** The image and the crop box live in one canvas: the
+  wheel zooms 0.25x-8x around the pointer, a drag on the background - or Space / middle-drag
+  anywhere - pans, `0` returns to the fitted view, and every image opens fitted and centred. A plain
+  drag on the box or a handle is still a crop operation, and the two never mix. A full-frame crop
+  leaves no background to grab, so the wheel is bound to the stage (it bubbles up through the box)
+  and Space/middle-drag works over the box: that crop stays both zoomable and pannable.
+- **Preview the crop.** A toolbar switch turns the viewport into the crop's result alone: the
+  rectangle fitted to the stage, the rest of the image clipped away. While it is on, every option is
+  frozen (aspect preset, X/Y/W/H, normalize, reset, output scaling) and so are the canvas gestures;
+  the switch itself and Enter/Esc stay live, the rectangle is never touched, and every image opens
+  editable again.
+- **The dialog draws the original file, not the thumbnail cache.** The new `GET /api/images/raw`
+  streams the source bytes with the file's own media type (ETag from size + mtime), so zooming shows
+  the pixels the crop actually keeps. A source the browser cannot decode falls back to the preview
+  thumbnail once; only a second failure is reported as a broken preview. The gallery and the zoom
+  surface stay on the grid/preview thumbnails.
+- **The output-scaling switch is also inside the dialog**, on the readout line. It is the same value
+  as the panel's switch - changing either writes both - so the choice carries through the run and
+  becomes the panel's state for the next one.
+
+### Changed
+
+- **The numeric W/H fields obey the locked aspect ratio.** With a preset locked, editing either one
+  derives the other live, and a size the frame cannot hold is capped by the largest rectangle of that
+  ratio that fits instead of breaking the lock; X/Y only move the box, and `free` keeps the two
+  fields independent.
+- The crop stage is a **fixed viewport**; the canvas inside it is what zoom and pan move, so the
+  dialog no longer reflows while you navigate the image.
+
 ## [0.2.0] - 2026-10-14
 
 ### Added
@@ -117,7 +150,8 @@ own `config_util`, not by a fixture of our own.
 - The service listens on `127.0.0.1` only. See [SECURITY.md](SECURITY.md) before changing that.
 - Requires Python 3.10 or newer. Torch is not needed.
 
-[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/AmethystLuna/kohya-dataset-tagger/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.3.0
 [0.2.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.2.0
 [0.1.1]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.1
 [0.1.0]: https://github.com/AmethystLuna/kohya-dataset-tagger/releases/tag/v0.1.0
